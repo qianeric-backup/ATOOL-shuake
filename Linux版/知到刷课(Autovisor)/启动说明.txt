@@ -1,0 +1,9 @@
+知到刷课(Autovisor) — Linux 启动说明
+======================
+源码位置: 知到刷课/autovisor-src/Autovisor-main/qt_gui.py
+一键启动: bash run_linux.sh  （或 python3 autovisor-src/Autovisor-main/qt_gui.py）
+
+依赖安装:
+  cd {proj}
+  pip install -r requirements.txt
+  浏览器驱动请安装到系统 PATH（chromedriver/geckodriver/msedgedriver）

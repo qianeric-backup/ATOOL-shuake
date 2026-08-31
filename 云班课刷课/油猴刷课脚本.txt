@@ -1,0 +1,84 @@
+// ==UserScript==
+// @name         云班课一键完成视频学习资源
+// @namespace    http://tampermonkey.net/
+// @version      2.2
+// @description  云班课一键完成视频学习资源，每个视频默认观看6s之后触发完成时间，进行进度更新，在执行脚本过程中，最好点击一次红色按钮，预先模拟用户操作，已防止bug发生！！！
+// @author       You
+// @icon         https://www.google.com/s2/favicons?sz=64&domain=mosoteach.cn
+// @match        https://www.mosoteach.cn/*
+// @grant        none
+// ==/UserScript==
+
+(function () {
+    function getFileExtension(filename) {
+        var extension = filename.match(/\.([^.]+)$/);
+        if (extension) {
+            return extension[1];
+        }
+        return "";
+    }
+    async function sleep(time) {
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                resolve()
+            }, time)
+        })
+    }
+    async function doWork(node) {
+        // 获取文件类型
+        const file_type = getFileExtension(node.querySelector('.res-name').innerText)
+        switch (file_type) {
+            case 'mp4':
+                node.click()
+                await sleep(3000)
+                var vdo = document.querySelector("#preview-video_native_hls")
+                vdo.play()
+                vdo.currentTime = 360000 // 直接将进度条拉到尽头，触发完成条件
+                await sleep(3000)
+                location.reload()
+                break
+            // case 'pptx':
+            //     node.click()
+            //     window.location.href = URL
+            //     break;
+            default:
+                // 进行下载操作
+                // node.querySelector('.download-res-button').click()
+                location.reload()
+        }
+    }
+
+    function createButton(text) {
+        const button = document.createElement("button");
+        button.innerText = text
+        button.style.position = 'fixed'
+        button.style.zIndex = '1000000'
+        button.style.height = '150px'
+        button.style.backgroundColor = 'red'
+        button.style.top = '20px'
+        button.style.right = '20px'
+        button.style.color = '#ffffff'
+        button.style.fontSize = '30px'
+        button.style.textAlign = 'center'
+        button.style.lineHeight = '50px'
+        return button
+    }
+
+
+    // const URL = window.location.href
+    const ns = document.querySelectorAll(".res-row")
+    const index = sessionStorage.getItem('script_index')
+    const button = createButton(`'脚本已就绪，请前往资源页面！当前进度：${index}/${ns.length} 
+    若视频出现黑屏状态，请点击此按钮进行修复！！！`)
+    document.body.appendChild(button)
+    if (index === undefined) {
+        sessionStorage.setItem('script_index', 0)
+        location.reload()
+    }
+    else {
+        if (index > ns.length - 1) return sessionStorage.removeItem('script_index')
+        doWork(ns[index - 0])
+        sessionStorage.setItem('script_index', (index - 0) + 1)
+    }
+
+})();

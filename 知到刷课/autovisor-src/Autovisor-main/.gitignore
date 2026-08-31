@@ -1,0 +1,14 @@
+build/
+dist/
+res/*
+!res/QRcode.jpg
+!res/stealth.min.js
+!res/zhs.ico
+.obsidian/
+.idea/
+__pycache__/
+.vscode/
+.venv/
+captcha/
+logs/
+./preview/*
