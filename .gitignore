@@ -1,0 +1,31 @@
+# 大文件产物（exe/zip 等通过 GitHub Releases 分发，不入 git）
+*.exe
+*.exe.bak
+*.zip
+*.7z
+*.rar
+
+# 构建产物
+dist/
+build/
+*.spec.bak
+
+# 缓存与临时文件
+__pycache__/
+*.pyc
+.pytest_cache/
+.reasonix/
+logs/
+
+# 日志
+*.log
+
+# 浏览器驱动（体积大，按需自行下载）
+edgedriver_win64/
+
+# 备份
+backup/
+
+# Python 虚拟环境
+venv/
+.venv/
