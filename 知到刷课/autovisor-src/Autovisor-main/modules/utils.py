@@ -11,7 +11,12 @@ from typing import Any
 
 from modules.configs import Config
 import time
-import pygetwindow as gw
+# pygetwindow 仅支持 Windows；Linux/macOS 下导入即抛 NotImplementedError，
+# 此处统一置为 None，窗口前置/隐藏功能在非 Windows 平台自动降级为跳过。
+try:
+    import pygetwindow as gw
+except NotImplementedError:
+    gw = None
 from modules.logger import Logger
 
 logger = Logger()
@@ -76,6 +81,9 @@ async def hide_window(page: Page) -> None:
 
 
 async def get_browser_window(page: Page) -> Any | None:
+    if gw is None:
+        # 非 Windows 平台无 pygetwindow，跳过窗口控制
+        return None
     custom_title = "Autovisor - Playwright"
     await page.wait_for_load_state("domcontentloaded")
     await page.evaluate(f'document.title = "{custom_title}"')
