@@ -162,6 +162,7 @@ class StartWindow(QMainWindow):
     models_fetched = Signal(list, str)  # (model_ids, error_msg)
     # 课程列表拉取完成信号（跨线程安全）
     courses_fetched = Signal(list, str)  # (course_names, error_msg)
+    api_tested = Signal(str, str)        # (result_msg, kind)  测试连接结果
 
     def __init__(self):
         super().__init__()
@@ -570,18 +571,33 @@ class StartWindow(QMainWindow):
         self.API_entry.setEchoMode(QLineEdit.EchoMode.Password)
         self.API_entry.setPlaceholderText('sk-... 或 OpenAI 兼容密钥')
         self.show_api_button = QPushButton('显示')
-        self.API_entry.setEchoMode(QLineEdit.EchoMode.Password)
-        self.show_api_button = QPushButton('显示')
         self.show_api_button.setCheckable(True)
         self.show_api_button.toggled.connect(self.show_api)
+        # Key 填完/修改后自动重拉模型列表（部分平台无 Key 时 /models 返回 401）
+        self.API_entry.editingFinished.connect(self.fetch_models)
         gl.addWidget(self.API_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
         gl.addWidget(self._input_widget(self.API_entry), self._detail_row_next - 1, 1,
                      Qt.AlignmentFlag.AlignLeft)
         gl.addWidget(self.show_api_button, self._detail_row_next - 1, 2, Qt.AlignmentFlag.AlignLeft)
 
         self.API_URL_label = QLabel('API 地址:')
-        self.API_URL_entry = QLineEdit()
-        self.API_URL_entry.editingFinished.connect(self.fetch_models)
+        # 可编辑预设下拉：常用平台一键填入，也支持手输任意 OpenAI 兼容地址
+        self.API_URL_entry = QComboBox()
+        self.API_URL_entry.setEditable(True)
+        self.API_URL_entry.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.API_URL_entry.addItems([
+            'https://api.deepseek.com',
+            'https://api.moonshot.cn/v1',
+            'https://open.bigmodel.cn/api/paas/v4',
+            'https://dashscope.aliyuncs.com/compatible-mode/v1',
+            'https://openrouter.ai/api/v1',
+            'https://api.siliconflow.cn/v1',
+            'http://127.0.0.1:11434/v1',
+            'http://127.0.0.1:8000/v1',
+        ])
+        self.API_URL_entry.lineEdit().setPlaceholderText('选择常用平台或输入自定义 OpenAI 兼容地址')
+        self.API_URL_entry.lineEdit().editingFinished.connect(self.fetch_models)
+        self.API_URL_entry.activated.connect(lambda _: self.fetch_models())
         gl.addWidget(self.API_URL_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
         gl.addWidget(self._input_widget(self.API_URL_entry), self._detail_row_next - 1, 1,
                      Qt.AlignmentFlag.AlignLeft)
@@ -596,7 +612,15 @@ class StartWindow(QMainWindow):
         self.refresh_models_button = QPushButton('🔄 刷新模型')
         self.refresh_models_button.setFixedWidth(90)
         self.refresh_models_button.clicked.connect(self.fetch_models)
-        gl.addWidget(self.refresh_models_button, self._detail_row_next - 1, 2,
+        self.test_api_button = QPushButton('⚡ 测试连接')
+        self.test_api_button.setFixedWidth(96)
+        self.test_api_button.clicked.connect(self.test_api_connection)
+        _btn_box = QWidget()
+        _btn_layout = QHBoxLayout(_btn_box)
+        _btn_layout.setContentsMargins(0, 0, 0, 0)
+        _btn_layout.addWidget(self.refresh_models_button)
+        _btn_layout.addWidget(self.test_api_button)
+        gl.addWidget(_btn_box, self._detail_row_next - 1, 2,
                      Qt.AlignmentFlag.AlignLeft)
 
         # API 状态行：单独占一行（不再与刷新按钮重叠）
@@ -606,6 +630,7 @@ class StartWindow(QMainWindow):
         self.api_status_row = _row()
         gl.addWidget(self.api_status_label, self.api_status_row, 1, Qt.AlignmentFlag.AlignLeft)
         self.models_fetched.connect(self._apply_models)
+        self.api_tested.connect(self._apply_api_test)
         self.courses_fetched.connect(self._apply_courses)
 
         self.pass_face_label = QLabel('跳过人脸:')
@@ -668,33 +693,39 @@ class StartWindow(QMainWindow):
         try:
             from selenium import webdriver
             from selenium.webdriver.common.by import By
-            from selenium.webdriver.edge.service import Service as EdgeService
-            from selenium.webdriver.edge.options import Options as EdgeOptions
 
+            # 按设置中的浏览器类型拉取课程（Linux 端默认 firefox）
+            browser = (self.browser_entry.currentText().strip().lower()
+                       or 'edge')
             driver_path = self.browser_driver_entry.text().strip()
-            # 跨平台查找 Edge 驱动：优先用户指定路径；其次系统 PATH（Linux 直接用
-            # msedgedriver，Windows 用 msedgedriver.exe）；最后交给 Selenium 自动管理
-            edge_path = driver_path or None
-            if edge_path and not os.path.isfile(edge_path):
-                edge_path = None
-            if not edge_path:
-                edge_path = shutil.which('msedgedriver') or shutil.which('msedgedriver.exe') or None
-            if not edge_path:
-                # Linux/macOS 常用目录
-                for cand in ('/usr/bin/msedgedriver', '/usr/local/bin/msedgedriver',
-                             '/usr/bin/chromedriver', '/usr/local/bin/chromedriver'):
-                    if os.path.isfile(cand):
-                        edge_path = cand
-                        break
-            if not edge_path:
-                # 交给 Selenium Manager 自动下载/查找（selenium>=4.11 默认启用）
-                pass
+            # 跨平台查找驱动：优先用户指定路径；其次系统 PATH（Linux 直接用
+            # 无后缀驱动名，Windows 用 *.exe）；最后交给 Selenium Manager 自动管理
+            exe_path = driver_path or None
+            if exe_path and not (os.path.isfile(exe_path) or shutil.which(exe_path)):
+                exe_path = None
+            if not exe_path:
+                exe_path = shutil.which(
+                    {'edge': 'msedgedriver', 'chrome': 'chromedriver',
+                     'firefox': 'geckodriver'}.get(browser, 'msedgedriver'))
+            if browser == 'chrome':
+                from selenium.webdriver.chrome.service import Service as _Service
+                from selenium.webdriver.chrome.options import Options as _Options
+                driver_cls = webdriver.Chrome
+            elif browser == 'firefox':
+                from selenium.webdriver.firefox.service import Service as _Service
+                from selenium.webdriver.firefox.options import Options as _Options
+                driver_cls = webdriver.Firefox
+            else:
+                from selenium.webdriver.edge.service import Service as _Service
+                from selenium.webdriver.edge.options import Options as _Options
+                driver_cls = webdriver.Edge
 
-            service = EdgeService(edge_path)
-            options = EdgeOptions()
+            service = _Service(exe_path)
+            options = _Options()
             options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_argument('--disable-web-security')
-            driver = webdriver.Edge(service=service, options=options)
+            if browser != 'firefox':
+                options.add_argument('--disable-web-security')
+            driver = driver_cls(service=service, options=options)
             try:
                 # 打开学习通首页，模拟登录
                 driver.get('https://i.chaoxing.com/')
@@ -718,23 +749,61 @@ class StartWindow(QMainWindow):
                         print('请完成登录（扫码/验证码）后自动继续…', flush=True)
                 except Exception:
                     pass
-                # 等待进入个人空间，提取课程列表
-                courses = []
-                for _ in range(5):  # 最多等 25 秒
-                    _time.sleep(5)
+                # 等待登录完成并提取课程列表：
+                # 手动登录（滑块/扫码/短信）可能耗时较长，最长轮询 150 秒，
+                # 期间浏览器保持打开，每 5 秒提取一次，成功立即继续
+                selectors = ('[class*="course-name"]', '[class*="courseName"]',
+                             '.courseBlock .courseName', 'li.course a',
+                             'div[class*="courseCard"]')
+
+                def _extract_course_names():
+                    """主文档 + 全部 iframe 内按多选择器提取课程名"""
+                    for css in selectors:
+                        try:
+                            elems = driver.find_elements(By.CSS_SELECTOR, css)
+                            names = [(e.get_attribute('title') or e.text or '').strip()
+                                     for e in elems]
+                            names = [n for n in names if n and len(n) > 1]
+                            if names:
+                                return list(dict.fromkeys(names))
+                        except Exception:
+                            pass
                     try:
-                        course_elems = driver.find_elements(
-                            By.CSS_SELECTOR, '[class="course-name"], [class="courseName"]')
-                        courses = [e.get_attribute('title') or e.text
-                                   for e in course_elems]
-                        courses = [c.strip() for c in courses if c and c.strip()]
-                        courses = list(dict.fromkeys(courses))  # 去重保序
+                        for frame in driver.find_elements(By.TAG_NAME, 'iframe'):
+                            try:
+                                driver.switch_to.frame(frame)
+                            except Exception:
+                                continue
+                            for css in selectors:
+                                try:
+                                    elems = driver.find_elements(By.CSS_SELECTOR, css)
+                                    names = [(e.get_attribute('title') or e.text or '').strip()
+                                             for e in elems]
+                                    names = [n for n in names if n and len(n) > 1]
+                                    if names:
+                                        driver.switch_to.default_content()
+                                        return list(dict.fromkeys(names))
+                                except Exception:
+                                    pass
+                            driver.switch_to.default_content()
                     except Exception:
-                        courses = []
+                        pass
+                    return []
+
+                courses = []
+                deadline = _time.time() + 150
+                while _time.time() < deadline:
+                    _time.sleep(5)
+                    courses = _extract_course_names()
                     if courses:
                         break
+                    try:
+                        print(f'等待登录/课程加载…（当前页面：{driver.title}）', flush=True)
+                    except Exception:
+                        pass
                 if not courses:
-                    self.courses_fetched.emit([], '登录后未获取到课程列表（可能是登录未完成或页面结构变化）')
+                    self.courses_fetched.emit(
+                        [], '已等待 150 秒未提取到课程（请确认登录已完成并进入个人空间页后重试）')
                     return
                 # 合并写入 course_name.json
                 course_file = _path('task', 'tool', 'course_name.json')
@@ -772,7 +841,20 @@ class StartWindow(QMainWindow):
             self.course_score_entry.addItems(courses)
             self._set_status(f'获取到 {len(courses)} 门课程', 'ok')
         else:
-            self._set_status('课程拉取失败: ' + (err or '未知错误'), 'error')
+            # 兜底：拉取失败时载入该手机号的历史课程，下拉框不至于一直为空
+            phone = self.phone_number_entry.text().strip()
+            cached = load_course_names().get(phone, []) if phone else []
+            if cached:
+                self.cour_entry.clear()
+                self.cour_entry.addItems(cached)
+                self.cour_entry.setCurrentText(cached[0])
+                self.course_vido_entry.clear()
+                self.course_vido_entry.addItems(cached)
+                self.course_score_entry.clear()
+                self.course_score_entry.addItems(cached)
+                self._set_status(f'本次拉取失败（{err or "未知错误"}），已载入 {len(cached)} 门历史课程', 'error')
+            else:
+                self._set_status('课程拉取失败: ' + (err or '未知错误'), 'error')
 
     # ---------------------------------------------------------------- 课程自动加载
     def _reload_courses_by_phone(self):
@@ -796,18 +878,22 @@ class StartWindow(QMainWindow):
     # ---------------------------------------------------------------- 模型自动获取
     def fetch_models(self):
         """自动拉取模型列表：后台线程 + requests 多协议探测（不阻塞 UI）"""
-        url = self.API_URL_entry.text().strip()
+        url = self.API_URL_entry.currentText().strip()
         key = self.API_entry.text().strip()
         if not url:
             return
+        # 序号自增：连续触发（改地址/改 Key/手动刷新）时旧请求结果自动作废
+        self._models_fetch_seq = getattr(self, '_models_fetch_seq', 0) + 1
+        seq = self._models_fetch_seq
+        self._set_status('正在拉取模型列表…', 'info')
         # 有缓存：先用缓存立即回填，再后台刷新（避免白屏）
         cached = self._models_cache.get(url)
         if cached:
             self._apply_models(cached, '')
-        threading.Thread(target=self._fetch_models_worker, args=(url, key),
+        threading.Thread(target=self._fetch_models_worker, args=(url, key, seq),
                          daemon=True).start()
 
-    def _fetch_models_worker(self, url, key):
+    def _fetch_models_worker(self, url, key, seq=0):
         """requests 多端点/多认证/多格式探测（后台线程执行，失败自动重试一次）"""
         import requests
         ids = []
@@ -839,6 +925,8 @@ class StartWindow(QMainWindow):
             else:
                 err = err or err2
         ids = list(dict.fromkeys(ids))
+        if seq and seq != getattr(self, '_models_fetch_seq', seq):
+            return  # 期间已发起新请求，丢弃过期结果
         if ids:
             self._models_cache[url] = ids  # 缓存本次成功结果
         self.models_fetched.emit(ids, '' if ids else (err or '未获取到可用模型'))
@@ -908,7 +996,7 @@ class StartWindow(QMainWindow):
         return [i for i in ids if i]
 
     def _apply_models(self, ids, err):
-        """主线程：填充模型下拉框并显示状态"""
+        """主线程：填充模型下拉框并显示状态；未选模型时按优先级自动选默认"""
         if ids:
             current = self.API_MODEL_entry.currentText()
             self.API_MODEL_entry.blockSignals(True)
@@ -917,10 +1005,86 @@ class StartWindow(QMainWindow):
             self.API_MODEL_entry.addItems(ids)
             if current in ids:
                 self.API_MODEL_entry.setCurrentText(current)
+            else:
+                # 自动选默认：deepseek-chat 等常用对话模型优先，免新手无从下手
+                pick = next((m for pref in ('deepseek-chat', 'deepseek-reasoner')
+                             if pref in ids), None)
+                pick = pick or next(
+                    (m for m in ids if 'deepseek' in m.lower()
+                     or 'chat' in m.lower() or 'flash' in m.lower()
+                     or 'mini' in m.lower()), None) or ids[0]
+                self.API_MODEL_entry.setCurrentText(pick)
+                current = pick
             self.API_MODEL_entry.blockSignals(False)
-            self._set_status(f'已获取 {len(ids)} 个模型', 'ok')
+            self._set_status(f'已获取 {len(ids)} 个模型，默认选择 {current}（可修改）', 'ok')
         else:
             self._set_status('拉取失败: ' + (err or '未知错误'), 'error')
+
+    # ---------------------------------------------------------------- API 连接测试
+    def test_api_connection(self):
+        """发一条最小 chat 请求实测 Key/地址/模型是否可用（后台线程，不阻塞 UI）"""
+        url = self.API_URL_entry.currentText().strip()
+        key = self.API_entry.text().strip()
+        model = self.API_MODEL_entry.currentText().strip()
+        if not url or not model:
+            self._set_status('测试连接：请先填写 API 地址并选择模型', 'error')
+            return
+        self.test_api_button.setEnabled(False)
+        self._set_status('正在测试连接…', 'info')
+        threading.Thread(target=self._test_api_worker,
+                         args=(url, key, model), daemon=True).start()
+
+    def _test_api_worker(self, url, key, model):
+        """OpenAI 兼容 /chat/completions 连通性测试（DeepSeek/百炼/Ollama/vLLM 等通用）"""
+        import requests
+        import time as _time
+        base = url.rstrip('/')
+        if base.endswith('/chat/completions'):
+            base = base[:-len('/chat/completions')]
+        headers = {'Content-Type': 'application/json'}
+        if key:
+            headers['Authorization'] = 'Bearer ' + key
+        payload = {'model': model,
+                   'messages': [{'role': 'user', 'content': '你好，请只回复:OK'}],
+                   'max_tokens': 5, 'stream': False}
+        t0 = _time.time()
+        try:
+            resp = requests.post(base + '/chat/completions', json=payload,
+                                 headers=headers, timeout=20)
+            latency = int((_time.time() - t0) * 1000)
+            if resp.status_code == 200:
+                try:
+                    data = resp.json()
+                except ValueError:
+                    self.api_tested.emit('响应 200 但非 JSON（地址可能不对）', 'error')
+                    return
+                if isinstance(data, dict) and (data.get('choices')
+                                               or data.get('content')
+                                               or data.get('message')):
+                    self.api_tested.emit(
+                        f'✓ 连接成功 {latency}ms（{model}）', 'ok')
+                else:
+                    self.api_tested.emit('响应 200 但缺少回复内容：' + str(data)[:80], 'error')
+                return
+            reason = {401: 'Key 无效或未授权', 403: '无权限访问该模型',
+                      404: '地址或模型不存在（检查是否需要 /v1）',
+                      429: '请求限流或额度不足'}.get(resp.status_code,
+                                                  f'HTTP {resp.status_code}')
+            detail = ''
+            try:
+                j = resp.json()
+                detail = str(j.get('error', {}).get('message', j)
+                             if isinstance(j, dict) else j)[:100]
+            except Exception:
+                detail = resp.text[:100]
+            self.api_tested.emit(f'{reason}：{detail}', 'error')
+        except Exception as e:
+            self.api_tested.emit('连接失败：' + str(e)[:120], 'error')
+
+    def _apply_api_test(self, msg, kind):
+        """主线程：显示测试连接结果并恢复按钮"""
+        self.test_api_button.setEnabled(True)
+        self._set_status(msg, kind)
 
     # ---------------------------------------------------------------- 其余页面
     def _build_help(self):
@@ -1350,19 +1514,35 @@ class StartWindow(QMainWindow):
             'firefox': 'geckodriver',
         }
         if choice in mapping:
-            # 优先已存在的候选驱动路径；否则填平台后缀（Windows .exe，Linux 无后缀）
+            # 优先已存在的候选驱动路径；其次系统 PATH / Linux 常见安装位置；
+            # 否则填平台后缀（Windows .exe，Linux 无后缀）
             cands = self._driver_candidates(choice)
             if cands:
                 self.browser_driver_entry.setText(cands[0])
-            else:
-                ext = '.exe' if os.name == 'nt' else ''
-                base = {
-                    'edge': 'edgedriver_win64' if os.name == 'nt' else 'edgedriver_linux64',
-                    'chrome': 'chromedriver',
-                    'firefox': 'geckodriver',
-                }[choice]
-                self.browser_driver_entry.setText(
-                    os.path.join(base, mapping[choice] + ext))
+                return
+            if os.name != 'nt':
+                name = mapping[choice]
+                found = shutil.which(name)
+                if not found:
+                    for cand in ('/usr/bin/' + name, '/usr/local/bin/' + name,
+                                 '/snap/bin/' + name):
+                        if os.path.isfile(cand):
+                            found = cand
+                            break
+                if found:
+                    self.browser_driver_entry.setText(found)
+                    return
+                # Linux 下默认填裸驱动名（交给系统 PATH / Selenium Manager 解析）
+                self.browser_driver_entry.setText(name)
+                return
+            ext = '.exe' if os.name == 'nt' else ''
+            base = {
+                'edge': 'edgedriver_win64' if os.name == 'nt' else 'edgedriver_linux64',
+                'chrome': 'chromedriver',
+                'firefox': 'geckodriver',
+            }[choice]
+            self.browser_driver_entry.setText(
+                os.path.join(base, mapping[choice] + ext))
 
     def select_file(self):
         filter_ = ('可执行文件 (*.exe);;所有文件 (*)' if os.name == 'nt'
@@ -1455,7 +1635,8 @@ class StartWindow(QMainWindow):
             for w in (self.API_label, self.API_entry, self.show_api_button,
                       self.API_URL_label, self.API_URL_entry,
                       self.API_MODEL_label, self.API_MODEL_entry,
-                      self.refresh_models_button, self.api_status_label):
+                      self.refresh_models_button, self.test_api_button,
+                      self.api_status_label):
                 w.setVisible(use_ai)
         finally:
             self._suppress_signals = False
@@ -1576,7 +1757,7 @@ class StartWindow(QMainWindow):
         data['video_title_choice'] = self.vido_question_entry.currentText()
         data['discussion_choice'] = self.discussion_entry.currentText()
         data['API'] = self.API_entry.text()
-        data['API_URL'] = self.API_URL_entry.text().strip()
+        data['API_URL'] = self.API_URL_entry.currentText().strip()
         data['API_MODEL'] = self.API_MODEL_entry.currentText().strip()
         data['speed'] = self.speed_entry.currentText()
         data['homework'] = self.homework_entry.currentText()
@@ -1596,10 +1777,18 @@ class StartWindow(QMainWindow):
             pass  # 兼容：edge 自动填
         if self.browser_driver_entry.text().strip():
             drv = self.browser_driver_entry.text().strip()
-            # 跨平台校验：Windows 必须为真实文件；Linux/macOS 允许是 PATH 中的驱动名
-            ok = os.path.isfile(drv)
+            # 跨平台校验：真实文件 → 系统 PATH 中的驱动名 → 项目约定驱动目录
+            # （与 main._find_project_driver 的运行时解析链一致；Linux 默认填的
+            # 裸名 "geckodriver" 即落在 学习通刷课/geckodriver/geckodriver）
+            ok = os.path.isfile(drv) or shutil.which(drv) is not None
             if not ok and os.name != 'nt':
-                ok = shutil.which(drv) is not None
+                for cand in self._driver_candidates(browser.strip().lower()):
+                    if os.path.basename(cand) == os.path.basename(drv):
+                        # 解析成功：把输入框回填为解析出的绝对路径，保存的配置更具体
+                        drv = cand
+                        self.browser_driver_entry.setText(cand)
+                        ok = True
+                        break
             if not ok:
                 errors.append('驱动文件不存在，请选择正确的驱动文件')
         else:
@@ -1618,11 +1807,16 @@ class StartWindow(QMainWindow):
                 errors.append('请完成答完题后的设置')
         if self._current_mode == 2 and not self.homework_entry.currentText():
             errors.append('请填写作业选择形式')
-        if self.question_entry.currentText() == AI_OPTION \
-                or self.vido_question_entry.currentText() == AI_OPTION \
-                or self.discussion_entry.currentText() == AI_OPTION:
+        if (self.question_entry.currentText() == AI_OPTION
+                or self.vido_question_entry.currentText() == AI_OPTION
+                or self.discussion_entry.currentText() == AI_OPTION):
+            # 逐项提示缺失项，避免只报"缺密钥"造成误导
             if not self.API_entry.text().strip():
-                errors.append('请填写 API 密钥')
+                errors.append('已选择 AI 智能答题：请填写 API Key')
+            if not self.API_URL_entry.currentText().strip():
+                errors.append('已选择 AI 智能答题：请填写或选择 API 地址')
+            if not self.API_MODEL_entry.currentText().strip():
+                errors.append('已选择 AI 智能答题：请选择或填写模型名')
         if errors:
             QMessageBox.warning(self, '警告', '\n'.join(errors))
             return False
@@ -1685,7 +1879,19 @@ class StartWindow(QMainWindow):
         self.cour_entry.setCurrentText(first or '')
 
         self.browser_entry.setCurrentText(data.get('browser', 'edge'))
-        self.browser_driver_entry.setText(data.get('driver_path', ''))
+        # Linux 端驱动路径兼容：旧配置里的 Windows 路径（C:\...、*.exe）在本机无效时，
+        # 自动回填该浏览器在 Linux 下的默认驱动（firefox 默认 geckodriver）
+        saved_browser = data.get('browser', 'edge')
+        saved_driver = data.get('driver_path', '')
+        if os.name != 'nt' and saved_driver:
+            usable = os.path.isfile(saved_driver) or shutil.which(saved_driver)
+            if not usable and ('\\' in saved_driver
+                               or saved_driver.lower().endswith('.exe')):
+                self.auto_fill_browser_driver(saved_browser)
+            else:
+                self.browser_driver_entry.setText(saved_driver)
+        else:
+            self.browser_driver_entry.setText(saved_driver)
         self.phone_number_entry.setText(data.get('phone_number', ''))
         self.password_entry.setText(data.get('password', ''))
         self.speed_entry.setCurrentText(data.get('speed', '2'))
@@ -1725,7 +1931,7 @@ class StartWindow(QMainWindow):
         elif saved_theme != '暗黑' and self.dark_mode:
             self.apply_theme('明亮')
         self.API_entry.setText(data.get('API', ''))
-        self.API_URL_entry.setText(data.get('API_URL', ''))
+        self.API_URL_entry.setEditText(data.get('API_URL', ''))
         self.API_MODEL_entry.setCurrentText(data.get('API_MODEL', ''))
         try:
             if data.get('font_type'):

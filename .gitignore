@@ -29,3 +29,11 @@ backup/
 # Python 虚拟环境
 venv/
 .venv/
+# Linux 运行环境（pip 目标安装 / deb 解包 / 驱动二进制，按 run_local.sh 与 README 重建）
+学习通刷课/shuake_src/.pylibs/
+学习通刷课/shuake_src/.syslib/
+学习通刷课/geckodriver/
+
+# Selenium Manager 误下载的 Edge 测试浏览器与驱动（642MB/25MB）
+学习通刷课/shuake_src/MicrosoftEdge/
+学习通刷课/shuake_src/msedgedriver/

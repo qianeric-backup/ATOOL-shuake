@@ -6,6 +6,7 @@
 #打包python -m PyInstaller --onefile --collect-all selenium main.py
 import json
 import os
+import shutil
 import re
 import sys
 import time
@@ -423,6 +424,17 @@ def run(driver,choice,course_name,API,lock_screen,pass_face,video_title_choice,d
             fold(driver)
         time.sleep(1)
 
+def _find_project_driver(name):
+    """在项目约定目录里找裸驱动名（与 qt_ui._driver_candidates 的扫描位一致）：
+    <cwd>/<驱动名>/<exe> 与 <源码上级>/<驱动名>/<exe>"""
+    roots = (os.getcwd(), _path('..'))
+    for root in roots:
+        for exe in (name, name + '.exe'):
+            cand = os.path.join(root, name, exe)
+            if os.path.isfile(cand):
+                return cand
+    return None
+
 def start_browser(browser,driver_path,speed):
     print(color.green('启动浏览器中...'), flush=True)
     if browser == 'chrome':
@@ -434,7 +446,15 @@ def start_browser(browser,driver_path,speed):
     else:
         from selenium.webdriver.edge.service import Service
         from selenium.webdriver.edge.options import Options
-    # 创建Driver服务
+    # 创建Driver服务：路径是文件直接用；裸驱动名走系统 PATH 和项目驱动目录
+    # （如 学习通刷课/geckodriver/geckodriver）；都找不到则传 None，
+    # 交给 Selenium Manager 自动下载/定位（selenium>=4.11）
+    if driver_path and not os.path.isfile(driver_path):
+        driver_path = (shutil.which(driver_path)
+                       or _find_project_driver(driver_path))
+    if driver_path and not os.path.isfile(driver_path):
+        print(color.yellow(f'驱动 {driver_path} 不存在，改用 Selenium Manager 自动定位'), flush=True)
+        driver_path = None
     service = Service(driver_path)
     options = Options()
     if browser != 'firefox':
