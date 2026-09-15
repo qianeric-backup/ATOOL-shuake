@@ -225,8 +225,9 @@ def DeepSeekAsk(API_KEY, title, _type, api_url=None, api_model=None):
     if answer is None:
         print(color.red(f'AI 请求失败：{last_err}'), flush=True)
         print(color.red(f'（实际请求 base_url={api_url}，模型={model}；'
-                        f'API_URL 应填 OpenAI 兼容根地址，如 https://open.bigmodel.cn/api/paas/v4，'
-                        f'不要带 /chat/completions 后缀）'), flush=True)
+                        f'若你填的是完整端点 /chat/completions 结尾，程序已自动剥去该后缀，'
+                        f'SDK 请求时会自动补回，两种填法等价；'
+                        f'若反复失败请检查 API key 是否有效、账户是否有余额）'), flush=True)
         return '[]'
 
     match = re.search(r'\[(.*?)\]', answer)
