@@ -213,17 +213,23 @@ def choice_course(driver, course_name,speed,task_type,phone_number):
         print(color.green(f'正在定位《{course_name}》...'),flush=True)
         # experience(driver)
         # turn_page(driver,'课程')
-        # 查找所有课程名称元素
-        course_elements = driver.find_elements(By.CLASS_NAME, 'course-name')
+        # 查找所有课程名称元素：页面加载慢时列表未渲染，轮询三个已知选择器
+        course_elements = []
         class_name = "course-name"
-        if len(course_elements) == 0:
-            course_elements = driver.find_elements(By.CLASS_NAME, 'courseName')
-            class_name = "courseName"
-        if len(course_elements) == 0:
-            # turn_page(driver, '个人空间')
-            # driver.switch_to.frame('frame_content')
-            course_elements = driver.find_elements(By.CSS_SELECTOR, '[class="w_cour_txtH fl"]')
-            class_name="w_cour_txtH fl"
+        for _ in range(15):
+            course_elements = driver.find_elements(By.CLASS_NAME, 'course-name')
+            class_name = "course-name"
+            if len(course_elements) == 0:
+                course_elements = driver.find_elements(By.CLASS_NAME, 'courseName')
+                class_name = "courseName"
+            if len(course_elements) == 0:
+                # turn_page(driver, '个人空间')
+                # driver.switch_to.frame('frame_content')
+                course_elements = driver.find_elements(By.CSS_SELECTOR, '[class="w_cour_txtH fl"]')
+                class_name = "w_cour_txtH fl"
+            if len(course_elements) > 0:
+                break
+            time.sleep(1)
         save_course_lst(driver,class_name,course_elements,phone_number)
         # 遍历所有课程元素
         for course_element in course_elements:
