@@ -44,19 +44,64 @@ def login_study(driver,phone_number,password):
     """
     使用指定的手机号和密码登录学习通网站。
 
+    - 调试模式（显示浏览器）：保持原流程——账密登录失败时可人工扫码/验证。
+    - 非调试模式（无头静默刷课）：仅账号密码自动登录，失败自动重试 3 次；
+      不依赖扫码（无头下扫码不可用，原死等逻辑会永久卡住），密码登录后
+      轮询页面标题判断完成（最长 20 秒，避免慢加载误判）。
+
     参数:
     driver: WebDriver 对象，用于控制浏览器。
     phone_number: 字符串，登录使用的手机号码。
     password: 字符串，登录使用的密码。
 
     返回:
-    无。
+    bool，登录成功 True / 失败 False（失败时调用方应中止刷课）。
     """
+    from task.tool import runtime_flags
     # 打开网页
     driver.get("https://i.chaoxing.com/")
     turn_page(driver,'用户登录')
     print(color.green('正在登录中...'), flush=True)
-    # 自动登录
+    # 已有有效 cookie 直接免登录（两种模式通用）
+    if driver.title != '用户登录':
+        if get_cookie(driver):
+            print(color.green('登录成功（cookie 自动登录）'), flush=True)
+            return True
+    if runtime_flags.HEADLESS:
+        # 非调试模式：纯账号密码自动登录 + 重试（不依赖扫码）
+        for attempt in range(1, 4):
+            try:
+                element = driver.find_element(By.ID, 'phone')
+                element1 = driver.find_element(By.ID, 'pwd')
+                element.clear()
+                element.send_keys(phone_number)
+                element1.clear()
+                element1.send_keys(password)
+                try:
+                    driver.find_element(By.ID, 'loginBtn').click()
+                except Exception:
+                    pass
+                # 轮询等待登录完成（最长 20 秒）
+                for _ in range(20):
+                    time.sleep(1)
+                    if driver.title != '用户登录':
+                        break
+                if driver.title != '用户登录':
+                    if get_cookie(driver):
+                        print(color.green('登录成功'), flush=True)
+                        return True
+            except Exception:
+                traceback.print_exc()
+            print(color.yellow(f'账号密码登录未完成（第 {attempt}/3 次），自动重试...'), flush=True)
+            try:
+                driver.get("https://passport2.chaoxing.com/login")
+                time.sleep(2)
+            except Exception:
+                pass
+        print(color.red('账号密码登录失败：请检查设置中的手机号/密码是否正确，'
+                        '或开启「调试模式」手动完成一次登录（扫码/验证）'), flush=True)
+        return False
+    # 调试模式（显示浏览器）：保持原流程，账密失败时可人工扫码/验证
     element = driver.find_element(By.ID, 'phone')
     time.sleep(1)
     element1 = driver.find_element(By.ID, 'pwd')
@@ -75,8 +120,8 @@ def login_study(driver,phone_number,password):
             time.sleep(1)
     if get_cookie(driver):
         print(color.green('登录成功'), flush=True)
-    else:
-        return
+        return True
+    return False
     # 转到页面内窗口
 
 
@@ -577,7 +622,13 @@ def main(browser, driver_path, phone_number, password, choice, course_lst,API,af
          lock_screen,speed, task_type,homework,pass_face,video_title_choice,discussion_choice,
          API_URL='', API_MODEL='', debug=True):
     driver = start_browser(browser, driver_path,speed,debug=debug)
-    login_study(driver, phone_number, password)
+    if not login_study(driver, phone_number, password):
+        # 登录失败（含无头模式账密重试 3 次未过）：中止本次刷课
+        try:
+            driver.quit()
+        except Exception:
+            pass
+        return
     for course_name in course_lst:
         choice_course(driver, course_name, speed,  task_type,phone_number)
         turn_page(driver, course_name)
