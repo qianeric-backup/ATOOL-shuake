@@ -191,7 +191,7 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
     attempts = ('默认环境', '重试', '清代理直连', 'curl 兜底')
     answer = None
     last_err = None
-    for label in attempts:
+    for idx, label in enumerate(attempts):
         saved = {}
         if label == '清代理直连':
             for k in _PROXY_KEYS:
@@ -213,17 +213,21 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
             break
         except Exception as e:
             last_err = e
-            # 仅对连接类异常重试（网络抖动/代理问题）；
-            # 401/400/404 等服务端应答重试无意义，直接结束
             msg = str(e)
             retryable = ('Connection' in msg or 'connection' in msg
                          or 'Timeout' in msg or 'timeout' in msg
                          or 'APIConnectionError' in type(e).__name__)
-            if label != '清代理直连' and retryable:
-                print(color.red(f'AI 请求失败（{label}）：{e}'), flush=True)
-                time.sleep(2)
-            else:
+            is_last = (idx == len(attempts) - 1)
+            # 401/400/404 等服务端明确应答：换通道也无意义，直接结束
+            # （但最后一跳 curl 前的"清代理直连"除外——curl 走不同
+            #   网络路径，值得再试一次）
+            if not retryable and label != '清代理直连':
                 break
+            print(color.red(f'AI 请求失败（{label}）：{e}'), flush=True)
+            if is_last:
+                break
+            if retryable:
+                time.sleep(2)
         finally:
             for k, v in saved.items():
                 os.environ[k] = v
