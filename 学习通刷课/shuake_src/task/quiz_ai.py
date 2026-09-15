@@ -21,6 +21,21 @@ from task.tool.send_wx import send_error
 # 设置默认编码为UTF-8
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
+# 题型归一化：新版学习通页面在【】里输出英文题型标记
+# （如 TrueorFalse / SingleChoice / MultipleChoice / ShortAnswer / Completion），
+# 旧版为中文。统一映射为中文，供题库检索与作答分支使用
+QUESTION_TYPE_ALIAS = {
+    'singlechoice': '单选题',
+    'multiplechoice': '多选题',
+    'multichoice': '多选题',
+    'trueorfalse': '判断题',
+    'judgement': '判断题',
+    'judge': '判断题',
+    'shortanswer': '简答题',
+    'completion': '填空题',
+    'gapfilling': '填空题',
+}
+
 
 
 class Answer:
@@ -121,8 +136,10 @@ class Answer:
             self.title_element = self.title_and_option_element.find_element(By.CSS_SELECTOR,
                                                                             '[class="clearfix font-cxsecret fontLabel"]')
             self.title = re.sub(r'\s+', '', self.decodeSecret.decode(self.title_element.text).strip())
-            # 题目类型
+            # 题目类型（英文标记归一化为中文，未知题型保持原样走"无法作答"分支）
             self.questionType = self.title[self.title.find("【") + 1: self.title.find("】")]
+            self.questionType = QUESTION_TYPE_ALIAS.get(
+                self.questionType.strip().lower(), self.questionType)
             # 题目文本
             self.title_text = self.title[self.title.find("】") + 1:]
             self.only_title_text.append(self.title_text)
