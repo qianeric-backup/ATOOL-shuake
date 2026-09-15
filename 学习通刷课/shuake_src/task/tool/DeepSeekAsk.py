@@ -2,6 +2,7 @@ import json
 import os
 import random
 import re
+import time
 
 from task.tool import color
 from openai import OpenAI
@@ -153,18 +154,52 @@ def DeepSeekAsk(API_KEY, title, _type, api_url=None, api_model=None):
     api_url = get_api_url(api_url)
     model = get_model(api_model, api_url, API_KEY)
 
-    try:
-        message = {"role": "user", "content": prompt}
-        client = OpenAI(api_key=API_KEY, base_url=api_url)
-        response = client.chat.completions.create(
-            model=model,
-            messages=[message],
-            temperature=1.3,
-            stream=False
-        )
-        answer = response.choices[0].message.content
-    except Exception as e:
-        print(color.red(f'AI 请求失败：{e}'), flush=True)
+    message = {"role": "user", "content": prompt}
+
+    # 请求策略：默认环境 → 2 秒后重试 → 清除代理环境变量直连。
+    # 覆盖两类常见 Connection error：网络抖动、桌面代理变量指向
+    # 已关闭/故障的本地代理（httpx trust_env 默认继承这些变量）
+    _PROXY_KEYS = ('http_proxy', 'https_proxy', 'all_proxy',
+                   'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
+                   'no_proxy', 'NO_PROXY')
+    attempts = ('默认环境', '重试', '清代理直连')
+    answer = None
+    last_err = None
+    for label in attempts:
+        saved = {}
+        if label == '清代理直连':
+            for k in _PROXY_KEYS:
+                if k in os.environ:
+                    saved[k] = os.environ.pop(k)
+        try:
+            client = OpenAI(api_key=API_KEY, base_url=api_url, timeout=60, max_retries=1)
+            response = client.chat.completions.create(
+                model=model,
+                messages=[message],
+                temperature=1.3,
+                stream=False
+            )
+            answer = response.choices[0].message.content
+            break
+        except Exception as e:
+            last_err = e
+            # 仅对连接类异常重试（网络抖动/代理问题）；
+            # 401/400/404 等服务端应答重试无意义，直接结束
+            msg = str(e)
+            retryable = ('Connection' in msg or 'connection' in msg
+                         or 'Timeout' in msg or 'timeout' in msg
+                         or 'APIConnectionError' in type(e).__name__)
+            if label != '清代理直连' and retryable:
+                print(color.red(f'AI 请求失败（{label}）：{e}'), flush=True)
+                time.sleep(2)
+            else:
+                break
+        finally:
+            for k, v in saved.items():
+                os.environ[k] = v
+
+    if answer is None:
+        print(color.red(f'AI 请求失败：{last_err}'), flush=True)
         print(color.red(f'（实际请求 base_url={api_url}，模型={model}；'
                         f'API_URL 应填 OpenAI 兼容根地址，如 https://open.bigmodel.cn/api/paas/v4，'
                         f'不要带 /chat/completions 后缀）'), flush=True)
