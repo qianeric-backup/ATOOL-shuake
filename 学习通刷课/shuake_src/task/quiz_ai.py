@@ -202,19 +202,28 @@ class Answer:
             num = 0
             for no_answer_title in self.no_answer_dit.values():
                 title += no_answer_title
-            answers = DeepSeekAsk(self.API_KEY, title, 'all', api_url=self.API_URL, api_model=self.API_MODEL)
-            # answers='C/B/ABCD/ABCD/实体经济/'
-            parts = re.split(r'/', answers)
-            for key, no_answer_title in self.no_answer_dit.items():
-                self.num_answer_dit[key] = re.split(',', parts[num])
-                # 缓存答案
-                question = Question(
-                    type=str(self.questionType_list[key]),  # 题目类型
-                    question=self.only_title_text[key],
-                    options=self.num_option_dit[key],
-                    API=self.API_KEY)
-                AnswerAPI().cache_answer(question, self.num_answer_dit[key])
-                num += 1
+            try:
+                answers = DeepSeekAsk(self.API_KEY, title, 'all', api_url=self.API_URL, api_model=self.API_MODEL)
+                # answers='C/B/ABCD/ABCD/实体经济/'
+                parts = re.split(r'/', answers)
+                for key, no_answer_title in self.no_answer_dit.items():
+                    if num >= len(parts):
+                        break   # AI 返回的答案数不足时只跳过剩余题，不越界
+                    self.num_answer_dit[key] = re.split(',', parts[num])
+                    # 缓存答案
+                    question = Question(
+                        type=str(self.questionType_list[key]),  # 题目类型
+                        question=self.only_title_text[key],
+                        options=self.num_option_dit[key],
+                        API=self.API_KEY)
+                    AnswerAPI().cache_answer(question, self.num_answer_dit[key])
+                    num += 1
+            except Exception:
+                # AI 兜底失败不应终止整课：无答案的题保持空答案，
+                # 后续照常保存/提交，其余题不受影响
+                traceback.print_exc()
+                print(color.red('AI 兜底搜题失败，无答案的题将留空'), flush=True)
+                self.no_answer_dit.clear()
 
 
     def finish_title(self, title_num):

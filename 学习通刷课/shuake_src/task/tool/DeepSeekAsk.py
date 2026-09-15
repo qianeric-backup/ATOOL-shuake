@@ -29,12 +29,20 @@ def _load_config():
 
 
 def get_api_url(api_url=None):
-    """获取 API 地址（优先使用传入参数，其次配置文件，最后默认值）"""
+    """规范化 API 地址（OpenAI 兼容接口通用）：
+    - 去首尾空白与尾部斜杠；
+    - 若误填了完整端点（以 /chat/completions 结尾）则剥掉该后缀，
+      避免与 OpenAI SDK 的自动拼接叠加成 /chat/completions/chat/completions
+      而得到 404 接口不存在"""
     if api_url:
-        return api_url.strip().rstrip('/')
-    config = _load_config()
-    url = config.get('API_URL', '').strip()
-    return url.rstrip('/') if url else DEFAULT_API_URL
+        url = api_url.strip()
+    else:
+        config = _load_config()
+        url = config.get('API_URL', '').strip()
+    url = url.rstrip('/')
+    if url.lower().endswith('/chat/completions'):
+        url = url[:-len('/chat/completions')].rstrip('/')
+    return url or DEFAULT_API_URL
 
 
 def get_model_list(api_url=None, api_key=None):
@@ -152,6 +160,9 @@ def DeepSeekAsk(API_KEY, title, _type, api_url=None, api_model=None):
         answer = response.choices[0].message.content
     except Exception as e:
         print(color.red(f'AI 请求失败：{e}'), flush=True)
+        print(color.red(f'（实际请求 base_url={api_url}，模型={model}；'
+                        f'API_URL 应填 OpenAI 兼容根地址，如 https://open.bigmodel.cn/api/paas/v4，'
+                        f'不要带 /chat/completions 后缀）'), flush=True)
         return '[]'
 
     match = re.search(r'\[(.*?)\]', answer)
