@@ -35,15 +35,47 @@ class do_work(Answer):
 
 
     def auto_choice_homework_question(self):
-        # 点击未完成的作业
-        elements = self.driver.find_elements(By.CSS_SELECTOR, '[name="group-radio"]')
-        elements[2].click()
+        # 点击类型筛选中的「作业」项：优先按文本匹配，原版索引兜底
+        # （原实现无等待直接 elements[2].click()，页面未渲染完就 IndexError，
+        #   或筛选组顺序变化导致点错——表现为"自动选择无效"）
+        radios = []
+        for _ in range(10):
+            radios = self.driver.find_elements(By.CSS_SELECTOR, '[name="group-radio"]')
+            if radios:
+                break
+            time.sleep(1)
+        print(color.green(f'检测到 {len(radios)} 个类型筛选单选'), flush=True)
+        clicked = False
+        for r in radios:
+            try:
+                label = (r.get_attribute('value') or r.get_attribute('aria-label')
+                         or r.text
+                         or r.find_element(By.XPATH, '..').text or '').strip()
+            except Exception:
+                label = ''
+            if '作业' in label:
+                r.click()
+                clicked = True
+                print(color.green(f'已点击筛选：{label}'), flush=True)
+                break
+        if not clicked and len(radios) > 2:
+            radios[2].click()
+            clicked = True
+            print(color.green('未匹配到文本，按原版逻辑点击第 3 个筛选'), flush=True)
+        if not clicked:
+            print(color.red('未找到作业筛选单选，无法自动选择'), flush=True)
+            return
         time.sleep(2)
-        # 作业列dddd表元素
-        try:
-            element = self.driver.find_element(By.CLASS_NAME, 'bottomList')
-        except:
-            print(color.red('未检测到作业'), flush=True)
+        # 作业列表可能延迟渲染，轮询等待
+        element = None
+        for _ in range(10):
+            try:
+                element = self.driver.find_element(By.CLASS_NAME, 'bottomList')
+                break
+            except Exception:
+                time.sleep(1)
+        if element is None:
+            print(color.red('未检测到作业列表（bottomList），请确认该课程是否有作业'), flush=True)
             return
         # 作业列表
         homework_list = element.find_elements(By.TAG_NAME, 'li')
@@ -52,6 +84,13 @@ class do_work(Answer):
             if i != 0:
                 turn_page(self.driver, self.course_name)
                 self.driver.switch_to.frame(self.driver.find_element(By.TAG_NAME, 'iframe'))
+                # 重新获取作业列表（切窗/切帧后旧元素引用已 stale）
+                try:
+                    element = self.driver.find_element(By.CLASS_NAME, 'bottomList')
+                    homework_list = element.find_elements(By.TAG_NAME, 'li')
+                except Exception:
+                    print(color.red('重新获取作业列表失败，停止自动选择'), flush=True)
+                    break
             homework = homework_list[i]
             # 获取作业名称
             homework_name = homework.get_attribute('aria-label')
