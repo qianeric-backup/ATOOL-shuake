@@ -1475,7 +1475,12 @@ class StartWindow(QMainWindow):
             self.process = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
-                cwd=_APP_DIR)
+                cwd=_APP_DIR,
+                # 关键：让子进程独立成新会话/进程组。否则它与 GUI 及
+                # 桌面会话同组，close_program 的 killpg 会把整个组
+                # （含 XFCE 会话组件）一起 SIGTERM——表现为"点结束刷课
+                # 把电脑 UI 重启"
+                **({} if os.name == 'nt' else {'start_new_session': True}))
         except Exception as e:
             self._append_log(f'启动失败: {e}')
             return
