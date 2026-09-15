@@ -1,0 +1,22 @@
+{
+  "browser": "chrome",
+  "driver_path": "C:\\chrome\\chromedriver.exe",
+  "phone_number": "",
+  "password": "",
+  "cour": [],
+  "choice": "随机答题",
+  "after_finish_question": "仅自动保存",
+  "video_title_choice": "随机答题",
+  "discussion_choice": "跳过讨论",
+  "API": "",
+  "API_URL": "",
+  "API_MODEL": "",
+  "speed": "4",
+  "homework": "手动选择",
+  "task_type": "章节",
+  "radio_var": 1,
+  "font_type": "Helvetica",
+  "font_size": "13",
+  "pass_face": 1,
+  "lock_screen": 1
+}
