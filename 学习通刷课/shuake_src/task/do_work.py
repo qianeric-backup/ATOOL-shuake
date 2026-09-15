@@ -158,9 +158,11 @@ class do_work(Answer):
         try:
             self.save_elements = self.driver.find_element(By.ID, 'submitFocus').find_elements(By.TAG_NAME, 'a')
             print(color.red('暂时保存，AI答题不一定完全正确，请自行确认后再提交'), flush=True)
-        except:
+        except Exception:
+            # 保存按钮找不到时直接返回，绝不能走到下面引用未定义的 save_elements
             print(color.red('保存失败，请手动保存，15秒后继续'), flush=True)
             time.sleep(15)
+            return
         for save_element in self.save_elements:
             if save_element.text == '暂时保存':
                 save_element.click()

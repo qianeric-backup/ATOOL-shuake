@@ -214,14 +214,17 @@ class Answer:
                 for key, no_answer_title in self.no_answer_dit.items():
                     if num >= len(parts):
                         break   # AI 返回的答案数不足时只跳过剩余题，不越界
-                    self.num_answer_dit[key] = re.split(',', parts[num])
-                    # 缓存答案
-                    question = Question(
-                        type=str(self.questionType_list[key]),  # 题目类型
-                        question=self.only_title_text[key],
-                        options=self.num_option_dit[key],
-                        API=self.API_KEY)
-                    AnswerAPI().cache_answer(question, self.num_answer_dit[key])
+                    ans_text = parts[num].strip()
+                    if ans_text and ans_text != '[]':
+                        # AI 对答不出的题可能输出 '[]'，视为无答案留空
+                        self.num_answer_dit[key] = re.split(',', ans_text)
+                        # 缓存答案
+                        question = Question(
+                            type=str(self.questionType_list[key]),  # 题目类型
+                            question=self.only_title_text[key],
+                            options=self.num_option_dit[key],
+                            API=self.API_KEY)
+                        AnswerAPI().cache_answer(question, self.num_answer_dit[key])
                     num += 1
             except Exception:
                 # AI 兜底失败不应终止整课：无答案的题保持空答案，
@@ -279,19 +282,42 @@ class Answer:
                 return True
 
             elif self.questionType_list[title_num] in ('简答题', '论述题', '名词解释', '计算题'):
-                text_frame=self.questionList0[title_num].find_element(By.TAG_NAME,'iframe')
-                self.driver.switch_to.frame(text_frame)
-                p_element=self.driver.find_element(By.TAG_NAME,'p')
-                check_answer = p_element.text
-                if check_answer != '':
-                    print(color.red('已回答，无需重复回答'), flush=True)
+                answer_text = ' '.join(answer) if isinstance(answer, list) else str(answer)
+                text_frame = self.questionList0[title_num].find_element(By.TAG_NAME, 'iframe')
+                # 富文本 iframe 可能未渲染（UMEditor 懒加载）或已 stale，
+                # switch_to.frame 会抛 NoSuchFrameError——改用 JS 直写
+                # contentDocument，不依赖 frame 切换
+                try:
+                    self.driver.switch_to.frame(text_frame)
+                    p_element = self.driver.find_element(By.TAG_NAME, 'p')
+                    check_answer = p_element.text
+                    if check_answer != '':
+                        print(color.red('已回答，无需重复回答'), flush=True)
+                        self.driver.switch_to.parent_frame()
+                        return True
+                    p_element.click()
+                    p_element.send_keys(answer_text)
                     self.driver.switch_to.parent_frame()
                     return True
-                # self.driver.execute_script('arguments[0].innerText = arguments[1];', p_element, answer)
-                p_element.click()
-                p_element.send_keys(answer)
-                self.driver.switch_to.parent_frame()
-                return True
+                except Exception:
+                    try:
+                        self.driver.switch_to.default_content()
+                    except Exception:
+                        pass
+                written = self.driver.execute_script(
+                    '''const f = arguments[0], text = arguments[1];
+                       const doc = f.contentDocument || (f.contentWindow && f.contentWindow.document);
+                       if (!doc || !doc.body) return false;
+                       if (doc.body.innerText.trim()) return 'answered';
+                       doc.body.innerHTML = text;
+                       return true;''', text_frame, answer_text)
+                if written == 'answered':
+                    print(color.red('已回答，无需重复回答'), flush=True)
+                    return True
+                if written is True:
+                    return True
+                print(color.red('该题富文本编辑框不可写，已跳过'), flush=True)
+                return False
             elif self.questionType_list[title_num]=='填空题':
                 if self.work_choice is not None:
                     elements = self.questionList0[title_num].find_elements(By.CLASS_NAME, 'InpDIV')
