@@ -45,5 +45,6 @@ venv/
 
 # Wine 交叉构建环境（Windows Python prefix / 构建中间产物，共 ~3.7GB）
 wine-build/
+!学习通刷课/wine-build/build.sh
 台账.txt
 .filter-backup/
