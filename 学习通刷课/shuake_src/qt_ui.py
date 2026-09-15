@@ -659,6 +659,17 @@ class StartWindow(QMainWindow):
         gl.addWidget(self.debug_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
         gl.addWidget(self.debug_check, self._detail_row_next - 1, 1, Qt.AlignmentFlag.AlignLeft)
 
+        self.uxue_label = QLabel('注入模式:')
+        self.uxue_check = QCheckBox('')
+        self.uxue_check.setToolTip(
+            '开启后改用 uXueScript 页面内脚本接管整门课程：\n'
+            '自动扫章节树并推进全部任务点（视频播放/倍速锁定/自动静音、\n'
+            'PDF 自动滚动、失焦/切屏防暂停守护）。\n'
+            '注意：测验(Quiz)任务点在注入模式下会跳过，需要刷题请关闭本选项。\n'
+            '与「作业模式」「刷题设置」互斥，注入模式下它们不生效。')
+        gl.addWidget(self.uxue_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
+        gl.addWidget(self.uxue_check, self._detail_row_next - 1, 1, Qt.AlignmentFlag.AlignLeft)
+
         self.homework_label = QLabel('选择作业:')
         self.homework_entry = QComboBox()
         self.homework_entry.addItems(['手动选择', '自动选择'])
@@ -1783,6 +1794,7 @@ class StartWindow(QMainWindow):
         data['pass_face'] = 1 if self.pass_face_check.isChecked() else 0
         data['lock_screen'] = 1 if self.lock_screen_check.isChecked() else 0
         data['debug_mode'] = 1 if self.debug_check.isChecked() else 0
+        data['uxue_inject'] = 1 if self.uxue_check.isChecked() else 0
         data['theme'] = self.theme_entry.currentText() if hasattr(self, 'theme_entry') else '明亮'
         return data
 
@@ -1945,6 +1957,7 @@ class StartWindow(QMainWindow):
         self.pass_face_check.setChecked(bool(data.get('pass_face', 0)))
         self.lock_screen_check.setChecked(bool(data.get('lock_screen', 0)))
         self.debug_check.setChecked(bool(int(data.get('debug_mode', 1))))
+        self.uxue_check.setChecked(bool(int(data.get('uxue_inject', 0))))
         # 恢复主题（默认明亮；暗黑时切换）
         saved_theme = data.get('theme', '明亮')
         try:

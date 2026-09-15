@@ -618,9 +618,111 @@ def delete_face_popup(driver,class_name='maskDiv1 chapterVideoFaceQrMaskDiv'):
     except Exception as e:
         pass
 
+def inject_uxue(driver, speed):
+    """注入 uXueScript core.js（无后端模式），由页面内脚本接管整门课程。
+
+    通过伪造 window.__TAURI_INTERNALS__.invoke 接上 Python 侧配置：
+    - options 命令返回静音/倍速锁定配置（speed='1' 时不锁定倍速）
+    - send_status 命令把章节/任务点进度写入 window.__UXUE_STATUS__ 队列
+    同时 hook console.* 把脚本日志写入 window.__UXUE_LOGS__ 供 Python 拉取。
+    """
+    core_path = _path('task', 'tool', 'uxue_core.js')
+    with open(core_path, encoding='utf-8') as f:
+        core_js = f.read()
+    speed_value = float(speed) if str(speed).replace('.', '', 1).isdigit() else 2.0
+    lock_speed = 'true' if str(speed) != '1' else 'false'
+    prelude = """
+window.__UXUE_STATUS__ = [];
+window.__UXUE_LOGS__ = [];
+window.confirm = () => true;   // 跳过脚本自带的使用须知弹窗
+window.__TAURI_INTERNALS__ = {
+  invoke: async (cmd, args) => {
+    if (cmd === 'options') {
+      return { muteWebview: true, speedLock: %(lock)s, speedValue: %(speed)s };
+    }
+    if (cmd === 'send_status') {
+      const st = (args && args.status) || {};
+      window.__UXUE_STATUS__.push(st);
+      const p = st.payload || {};
+      if (st.kind === 'chapter') {
+        console.info('章节进度: ' + (p.title || '') + ' [' + ((p.index || 0) + 1) + '/' + (p.total || 0) + ']');
+      } else if (st.kind === 'task') {
+        console.info('任务点 #' + ((p.index || 0) + 1) + ' 类别: ' + (p.category || ''));
+      } else if (st.kind === 'start') {
+        console.info('uXue 注入流程已启动');
+      } else if (st.kind === 'finish') {
+        console.info('uXue 注入流程：全部章节处理完毕');
+      }
+      return null;
+    }
+    return null;   // solve_quiz 等无后端能力：由 core.js 自行跳过 Quiz 任务点
+  }
+};
+(() => {
+  const push = (level) => (...a) => {
+    try {
+      const line = '[' + level + '] ' + a.map(x =>
+        (x && typeof x === 'object') ? JSON.stringify(x) : String(x)).join(' ');
+      window.__UXUE_LOGS__.push(line);
+      if (window.__UXUE_LOGS__.length > 500) {
+        window.__UXUE_LOGS__.splice(0, window.__UXUE_LOGS__.length - 500);
+      }
+    } catch (e) {}
+  };
+  ['log', 'info', 'warn', 'error'].forEach(l => { console[l] = push(l); });
+})();
+""" % {'lock': lock_speed, 'speed': speed_value}
+    driver.switch_to.default_content()
+    driver.execute_script(prelude)
+    driver.execute_script(core_js)
+    print(color.green('uXueScript core.js 注入成功，页面内脚本已接管课程流程'), flush=True)
+
+
+def wait_uxue_finished(driver, timeout_hours=6):
+    """轮询 uXue 注入脚本的日志与状态队列，直到整课完成/取消/超时。
+
+    返回 True=正常完成；False=取消或超时。
+    """
+    deadline = time.time() + timeout_hours * 3600
+    last_log = time.time()
+    while time.time() < deadline:
+        try:
+            logs = driver.execute_script(
+                'return (window.__UXUE_LOGS__ || []).splice(0, 200);') or []
+        except WebDriverException:
+            # 页面刷新/导航会清空 JS 上下文（注入脚本随之终止）
+            print(color.red('页面已刷新/导航，uXue 注入脚本上下文丢失，提前结束'),
+                  flush=True)
+            return False
+        for line in logs:
+            print(color.blue(line), flush=True)
+        try:
+            statuses = driver.execute_script(
+                'return (window.__UXUE_STATUS__ || []).splice(0, 50);') or []
+        except WebDriverException:
+            statuses = []
+        for st in statuses:
+            kind = st.get('kind')
+            if kind == 'finish':
+                print(color.green('uXue 注入流程：整门课程处理完成'), flush=True)
+                return True
+            if kind == 'cancel':
+                print(color.yellow('uXue 注入流程已被取消'), flush=True)
+                return False
+        if logs:
+            last_log = time.time()
+        elif time.time() - last_log > 300:
+            print(color.blue('uXue 注入流程运行中（视频/任务点进行中）...'),
+                  flush=True)
+            last_log = time.time()
+        time.sleep(5)
+    print(color.red(f'uXue 注入流程超过 {timeout_hours} 小时仍未完成，提前结束'),
+          flush=True)
+    return False
+
 def main(browser, driver_path, phone_number, password, choice, course_lst,API,after_finish_question,
          lock_screen,speed, task_type,homework,pass_face,video_title_choice,discussion_choice,
-         API_URL='', API_MODEL='', debug=True):
+         API_URL='', API_MODEL='', debug=True, uxue_inject=False):
     driver = start_browser(browser, driver_path,speed,debug=debug)
     if not login_study(driver, phone_number, password):
         # 登录失败（含无头模式账密重试 3 次未过）：中止本次刷课
@@ -633,6 +735,17 @@ def main(browser, driver_path, phone_number, password, choice, course_lst,API,af
         choice_course(driver, course_name, speed,  task_type,phone_number)
         turn_page(driver, course_name)
         experience(driver)
+        if uxue_inject:
+            # uXueScript 注入模式：页面内脚本自动扫章节树并推进全部任务点
+            # （视频播放/倍速锁定/静音、PDF 自动滚动、失焦防暂停守护；
+            #   Quiz 任务点无后端能力会自动跳过）
+            inject_uxue(driver, speed)
+            wait_uxue_finished(driver)
+            print(color.yellow('注入模式提示：测验(Quiz)任务点未自动处理，'
+                               '如需刷题请关闭注入模式后重跑本课程'), flush=True)
+            driver.close()
+            turn_page(driver, '个人空间')
+            continue
         if pass_face==1:
             with open(rf'task/tool/face_url.json', 'r', encoding='utf-8') as f:
                 data = json.load(f)
@@ -751,7 +864,8 @@ def run_main():
             account_info['cour'],account_info['API'],account_info['after_finish_question'],account_info['lock_screen'],account_info['speed'],account_info['task_type'],
              account_info['homework'],account_info['pass_face'],account_info['video_title_choice'],account_info['discussion_choice'],
              account_info.get('API_URL',''), account_info.get('API_MODEL',''),
-             bool(int(account_info.get('debug_mode', 1))))
+             bool(int(account_info.get('debug_mode', 1))),
+             bool(int(account_info.get('uxue_inject', 0))))
     except NoSuchWindowException as e:
         print(color.red('❌ 窗口意外关闭'),flush=True)
     except SessionNotCreatedException as e:

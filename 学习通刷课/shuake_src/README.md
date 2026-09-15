@@ -88,6 +88,18 @@ pip install selenium pyautogui requests PySide6 colorama openai", "old_string": 
 - 无头模式不会弹摄像头/人脸窗，请同时勾选「跳过人脸」；
 - 两者播放/答题/跳页能力完全一致，只是不渲染窗口。
 
+### 注入模式（uXueScript，高级设置）
+
+开启后改用 [uXueScript](https://github.com/unraous/uxuescript)（v2.0.2，GPL-3.0-only，已原样嵌入 `task/tool/uxue_core.js`）的页面内脚本接管整门课程：
+
+- 自动扫描课程章节树，跳过已完成章节，逐个推进未完成任务点
+- 视频：自动点击播放、**倍速锁定**（倍速设置 N → playbackRate 锁 N，防播放器降速）、自动静音
+- PDF/图文：自动平滑滚动触底并等待完成状态
+- **失焦/切屏防暂停守护**：拦截 `blur`/`visibilitychange`/鼠标移出等事件并伪造页面可见态，后台挂机不中断
+- Python 侧仅注入与监控：实时透传脚本日志、章节/任务点进度，整课完成或超时（默认 6 小时）后结束
+
+**边界**：测验（Quiz）任务点在注入模式下会自动跳过（原脚本该能力依赖其 Tauri 后端），需要刷题请关闭注入模式用普通模式补刷；「作业模式」与「刷题设置」在注入模式下不生效。第三方代码许可见 `task/tool/uxue_core.js` 文件头标注。
+
 ### 模型列表自动获取（多协议自适应）
 
 在「高级设置」填写 API 地址后，程序自动探测并拉取模型列表，兼容多种接口协议：
