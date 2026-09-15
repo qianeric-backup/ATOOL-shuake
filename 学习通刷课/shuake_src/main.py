@@ -806,7 +806,7 @@ def main(browser, driver_path, phone_number, password, choice, course_lst,API,af
             check_face(driver,face_url,face_class='maskDiv',course_name=course_name)
         if find_mission(driver,task_type,speed):
             if task_type=='作业':
-                do_work(driver,course_name,homework,API,API_URL=API_URL,API_MODEL=API_MODEL)
+                do_work(driver,course_name,homework,API,api_url=API_URL,api_model=API_MODEL)
                 return
             turn_page(driver, '学生学习页面')
             fold(driver)
