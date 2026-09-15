@@ -22,16 +22,25 @@ class do_work(Answer):
         self.driver = driver
         self.course_name = course_name
         if self.homework == '自动选择':
-            self.auto_choice_homework_question()
+            if not self.auto_choice_homework_question():
+                # 实测（2026-09）：「作业」nav 在部分学校加载的是 mobilelearn
+                # 活动聚合页（stuActiveList），其中的 group-radio 是活动筛选、
+                # bottomList 恒为空——旧版自动遍历逻辑对该页面结构无效。
+                # 找不到真实作业列表时回退手动模式，不空跑不乱点
+                print(color.red('自动选择未找到可处理的作业列表，已回退手动模式：请手动点开你要刷的作业'), flush=True)
+                self.wait_manual_open()
         elif self.homework == '手动选择':
             print(color.green('请手动选择你要刷的作业，点开即可'), flush=True)
-            now_window_handles = len(driver.window_handles)
-            while len(driver.window_handles) == now_window_handles:
-                time.sleep(1)
-            time.sleep(2)
-            self.get_answer_list()
+            self.wait_manual_open()
         print(color.green(f'已完成作业,15秒后自动关闭窗口'), flush=True)
         time.sleep(15)
+
+    def wait_manual_open(self):
+        now_window_handles = len(self.driver.window_handles)
+        while len(self.driver.window_handles) == now_window_handles:
+            time.sleep(1)
+        time.sleep(2)
+        self.get_answer_list()
 
 
     @staticmethod
@@ -54,6 +63,8 @@ class do_work(Answer):
                 return False
 
     def auto_choice_homework_question(self):
+        """自动遍历作业列表。返回 True=已自动处理完成；
+        False=当前页面没有真实作业列表（调用方回退手动模式）"""
         # 点击类型筛选中的「作业」项：优先按文本匹配，原版索引兜底
         # （原实现无等待直接 elements[2].click()，页面未渲染完就 IndexError，
         #   或筛选组顺序变化导致点错——表现为"自动选择无效"）
@@ -84,8 +95,8 @@ class do_work(Answer):
                 clicked = True
                 print(color.green(f'未匹配到文本，按原版逻辑点击第 3 个筛选（各筛选项：{labels}）'), flush=True)
         if not clicked:
-            print(color.red(f'未找到可点击的作业筛选单选（各筛选项：{labels}），无法自动选择'), flush=True)
-            return
+            print(color.red(f'未找到可点击的作业筛选单选（各筛选项：{labels}）'), flush=True)
+            return False
         time.sleep(2)
         # 作业列表可能延迟渲染，轮询等待
         element = None
@@ -96,10 +107,15 @@ class do_work(Answer):
             except Exception:
                 time.sleep(1)
         if element is None:
-            print(color.red('未检测到作业列表（bottomList），请确认该课程是否有作业'), flush=True)
-            return
+            print(color.red('未检测到作业列表（bottomList）'), flush=True)
+            return False
         # 作业列表
         homework_list = element.find_elements(By.TAG_NAME, 'li')
+        if not homework_list:
+            # bottomList 存在但没有作业条目（活动聚合页 In progress(0)/Ended(0)
+            # 就是这种形态）——当前页面无真实作业，回退手动
+            print(color.red('作业列表为空（0 个条目）'), flush=True)
+            return False
         print(color.green(f'已检测到{len(homework_list)}个作业'), flush=True)
         for i in range(len(homework_list)):
             if i != 0:
