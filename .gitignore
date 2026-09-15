@@ -37,3 +37,6 @@ venv/
 # Selenium Manager 误下载的 Edge 测试浏览器与驱动（642MB/25MB）
 学习通刷课/shuake_src/MicrosoftEdge/
 学习通刷课/shuake_src/msedgedriver/
+
+# Wine 交叉构建环境（Windows Python prefix / 构建中间产物，共 ~3.7GB）
+wine-build/
