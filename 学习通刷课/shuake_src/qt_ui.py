@@ -647,6 +647,16 @@ class StartWindow(QMainWindow):
         gl.addWidget(self.lock_screen_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
         gl.addWidget(self.lock_screen_check, self._detail_row_next - 1, 1, Qt.AlignmentFlag.AlignLeft)
 
+        self.debug_label = QLabel('调试模式:')
+        self.debug_check = QCheckBox('')
+        self.debug_check.setChecked(True)
+        self.debug_check.setToolTip(
+            '开启：显示浏览器窗口，可观察刷课过程与扫码登录。\n'
+            '关闭：浏览器无头静默运行（不显示窗口、不占用鼠标键盘），\n'
+            '首次登录/排查问题时建议开启；静默模式下建议同时勾选「跳过人脸」。')
+        gl.addWidget(self.debug_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
+        gl.addWidget(self.debug_check, self._detail_row_next - 1, 1, Qt.AlignmentFlag.AlignLeft)
+
         self.homework_label = QLabel('选择作业:')
         self.homework_entry = QComboBox()
         self.homework_entry.addItems(['手动选择', '自动选择'])
@@ -1769,6 +1779,7 @@ class StartWindow(QMainWindow):
         data['font_size'] = self.size_entry.currentText()
         data['pass_face'] = 1 if self.pass_face_check.isChecked() else 0
         data['lock_screen'] = 1 if self.lock_screen_check.isChecked() else 0
+        data['debug_mode'] = 1 if self.debug_check.isChecked() else 0
         data['theme'] = self.theme_entry.currentText() if hasattr(self, 'theme_entry') else '明亮'
         return data
 
@@ -1930,6 +1941,7 @@ class StartWindow(QMainWindow):
 
         self.pass_face_check.setChecked(bool(data.get('pass_face', 0)))
         self.lock_screen_check.setChecked(bool(data.get('lock_screen', 0)))
+        self.debug_check.setChecked(bool(int(data.get('debug_mode', 1))))
         # 恢复主题（默认明亮；暗黑时切换）
         saved_theme = data.get('theme', '明亮')
         try:

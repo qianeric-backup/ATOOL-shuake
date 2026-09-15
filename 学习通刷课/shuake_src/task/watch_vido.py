@@ -12,6 +12,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 
 from task.tool.DeepSeekAsk import DeepSeekAsk
 from task.tool import color
+from task.tool import runtime_flags
 import pyautogui
 from selenium.webdriver.common.by import By
 import itertools
@@ -175,9 +176,10 @@ def check_vido_play(driver, last_time, current_time):
                     print(color.red(f'当前视频已被设置不能调节高倍数，现在将倍数调至1倍'), flush=True)
                     account_info['speed'] = '1'
                 for j in range(int(int(speed) - new_speed) * 10):
-                    pyautogui.press('a')
+                    if not runtime_flags.HEADLESS:
+                        pyautogui.press('a')   # 无头模式下跳过（依赖真实屏幕焦点）
                     action = ActionChains(driver)
-                    action.send_keys('a').perform()
+                    action.send_keys('a').perform()   # WebDriver 通道，无头下同样有效
                     time.sleep(0.1)
                 print(color.green('调节成功'), flush=True)
                 try:
@@ -261,7 +263,8 @@ def check_vido_finish(driver,i,time_start,total_time,vido_iframe,lock_screen,API
                     time_end = time.time()
                     print(color.green('总共耗费了%.2f秒.' % (time_end - time_start)), flush=True)
                     break
-            if lock_screen:
+            if lock_screen and not runtime_flags.HEADLESS:
+                # 无头模式下没有可见窗口需要保持前台，晃鼠标反而干扰用户
                 pyautogui.move(20, 0, )
                 pyautogui.move(-20, 0)
     return True

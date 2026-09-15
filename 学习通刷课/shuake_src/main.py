@@ -283,12 +283,12 @@ def set_speed(speed,driver):
     print(color.blue(f'调节倍数为：{speed}X'), flush=True)
     try:
         speed=int(speed)-1
-        # body = driver.find_element(By.TAG_NAME, 'div')
-        # body.click()
+        from task.tool import runtime_flags
         for i in range(int(speed)*10):
-            pyautogui.press('d')
+            if not runtime_flags.HEADLESS:
+                pyautogui.press('d')   # 无头模式下跳过（依赖真实屏幕焦点）
             action=ActionChains(driver)
-            action.send_keys('d').perform()
+            action.send_keys('d').perform()   # WebDriver 通道，无头下同样有效
             time.sleep(0.1)
         print(color.green('调节成功'), flush=True)
         condition=False
@@ -485,7 +485,12 @@ def _find_project_driver(name):
                 return cand
     return None
 
-def start_browser(browser,driver_path,speed):
+def start_browser(browser,driver_path,speed,debug=True):
+    # 调试模式关闭时进入无头静默刷课：不显示窗口、不占鼠标键盘
+    from task.tool import runtime_flags
+    runtime_flags.HEADLESS = not debug
+    if runtime_flags.HEADLESS:
+        print(color.blue('静默刷课模式（无头浏览器）：不显示窗口，倍速走键盘通道'), flush=True)
     print(color.green('启动浏览器中...'), flush=True)
     if browser == 'chrome':
         from selenium.webdriver.chrome.service import Service
@@ -507,6 +512,16 @@ def start_browser(browser,driver_path,speed):
         driver_path = None
     service = Service(driver_path)
     options = Options()
+    if not debug:
+        # 无头模式参数：视频自动播放免手势 + 静音 + 大视口防元素点击失败
+        if browser == 'firefox':
+            options.add_argument('-headless')
+            options.add_argument('--window-size=1600,900')
+        else:
+            options.add_argument('--headless=new')
+            options.add_argument('--window-size=1600,900')
+            options.add_argument('--mute-audio')
+            options.add_argument('--autoplay-policy=no-user-gesture-required')
     if browser != 'firefox':
         options.add_argument("--disable-blink-features=AutomationControlled")  # 禁用自动化控制提示
         if speed!='1':
@@ -560,8 +575,8 @@ def delete_face_popup(driver,class_name='maskDiv1 chapterVideoFaceQrMaskDiv'):
 
 def main(browser, driver_path, phone_number, password, choice, course_lst,API,after_finish_question,
          lock_screen,speed, task_type,homework,pass_face,video_title_choice,discussion_choice,
-         API_URL='', API_MODEL=''):
-    driver = start_browser(browser, driver_path,speed)
+         API_URL='', API_MODEL='', debug=True):
+    driver = start_browser(browser, driver_path,speed,debug=debug)
     login_study(driver, phone_number, password)
     for course_name in course_lst:
         choice_course(driver, course_name, speed,  task_type,phone_number)
@@ -684,7 +699,8 @@ def run_main():
         main(browser, account_info.get('driver_path', ''), account_info['phone_number'], account_info['password'],account_info['choice'],
             account_info['cour'],account_info['API'],account_info['after_finish_question'],account_info['lock_screen'],account_info['speed'],account_info['task_type'],
              account_info['homework'],account_info['pass_face'],account_info['video_title_choice'],account_info['discussion_choice'],
-             account_info.get('API_URL',''), account_info.get('API_MODEL',''))
+             account_info.get('API_URL',''), account_info.get('API_MODEL',''),
+             bool(int(account_info.get('debug_mode', 1))))
     except NoSuchWindowException as e:
         print(color.red('❌ 窗口意外关闭'),flush=True)
     except SessionNotCreatedException as e:
