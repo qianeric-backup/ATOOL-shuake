@@ -275,8 +275,20 @@ def find_mission(driver,task_type,speed):
         if element.text== task_type:
             element.click()
             break
-    driver.switch_to.frame(driver.find_element(By.TAG_NAME,'iframe'))
     # 切换到名为 frame_content-zj 的 iframe
+    # 页面加载慢时 iframe 尚未渲染：轮询等待，最终找不到则视为本页
+    # 无可处理任务（返回 False），不再冒泡终止整课
+    iframe_el = None
+    for _ in range(10):
+        try:
+            iframe_el = driver.find_element(By.TAG_NAME, 'iframe')
+            break
+        except Exception:
+            time.sleep(1)
+    if iframe_el is None:
+        print(color.red('未检测到课程内容 iframe（页面可能未加载完成），跳过本页'), flush=True)
+        return False
+    driver.switch_to.frame(iframe_el)
     if task_type == '作业':
         return True
     try:
