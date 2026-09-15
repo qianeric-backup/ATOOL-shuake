@@ -34,6 +34,25 @@ class do_work(Answer):
         time.sleep(15)
 
 
+    @staticmethod
+    def _click_filter_radio(driver, r):
+        """点击类型筛选单选。学习通的 radio input 通常 display:none
+        （仅显示样式化 label），原生 click 会报 ElementNotInteractable
+        （could not be scrolled into view）——先滚动再 JS 点击兜底"""
+        try:
+            driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", r)
+        except Exception:
+            pass
+        try:
+            r.click()
+            return True
+        except Exception:
+            try:
+                driver.execute_script("arguments[0].click();", r)
+                return True
+            except Exception:
+                return False
+
     def auto_choice_homework_question(self):
         # 点击类型筛选中的「作业」项：优先按文本匹配，原版索引兜底
         # （原实现无等待直接 elements[2].click()，页面未渲染完就 IndexError，
@@ -45,25 +64,27 @@ class do_work(Answer):
                 break
             time.sleep(1)
         print(color.green(f'检测到 {len(radios)} 个类型筛选单选'), flush=True)
+        labels = []
         clicked = False
-        for r in radios:
+        for idx, r in enumerate(radios):
             try:
                 label = (r.get_attribute('value') or r.get_attribute('aria-label')
                          or r.text
                          or r.find_element(By.XPATH, '..').text or '').strip()
             except Exception:
                 label = ''
+            labels.append(label)
             if '作业' in label:
-                r.click()
-                clicked = True
-                print(color.green(f'已点击筛选：{label}'), flush=True)
-                break
+                if self._click_filter_radio(self.driver, r):
+                    clicked = True
+                    print(color.green(f'已点击筛选：{label}'), flush=True)
+                    break
         if not clicked and len(radios) > 2:
-            radios[2].click()
-            clicked = True
-            print(color.green('未匹配到文本，按原版逻辑点击第 3 个筛选'), flush=True)
+            if self._click_filter_radio(self.driver, radios[2]):
+                clicked = True
+                print(color.green(f'未匹配到文本，按原版逻辑点击第 3 个筛选（各筛选项：{labels}）'), flush=True)
         if not clicked:
-            print(color.red('未找到作业筛选单选，无法自动选择'), flush=True)
+            print(color.red(f'未找到可点击的作业筛选单选（各筛选项：{labels}），无法自动选择'), flush=True)
             return
         time.sleep(2)
         # 作业列表可能延迟渲染，轮询等待
