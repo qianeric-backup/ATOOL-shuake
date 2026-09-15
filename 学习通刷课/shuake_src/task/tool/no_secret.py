@@ -2,6 +2,7 @@ import base64
 import hashlib
 import re
 import os
+import time
 from xml.dom.minidom import parse
 
 import unicodedata
@@ -9,6 +10,7 @@ import unicodedata
 
 # 第三方包
 from selenium.webdriver.common.by import By
+from selenium.common.exceptions import StaleElementReferenceException
 from fontTools.ttLib import TTFont
 
 from task.tool import file
@@ -34,20 +36,30 @@ class DecodeSecret:
     def getFontFace(self, driver):
         if self._statusCode == 0:
             return
-        fontFaceItem = driver.find_element(By.TAG_NAME, "head").find_elements(By.CSS_SELECTOR, '[type="text/css"]')
         fontFaceStr = ""
-        for i in fontFaceItem:
-            strData = i.get_attribute('innerHTML')
-            if strData == "":
-                continue
-            else:
-                try:
-                    fontFaceStr = re.findall(";base64,(.*)'[)] format", strData)[0]
-                    break
-                except Exception as e:
-                    print("当前 fontFace 无法解析：" + str(e), flush=True)
-                    print('当前题目中含有字母或数学特殊符号，无法识别，请选择其他科目进行答题', flush=True)
-                    continue
+        for _attempt in range(3):
+            try:
+                # 文档级单次查询 head 内的 style 标签，不持有 <head> 元素引用：
+                # 原来「先 find_element(head) 再 find_elements 子元素」的两步
+                # 写法，在题目页刷新/文档切换时会抛 StaleElementReferenceException
+                fontFaceItem = driver.find_elements(
+                    By.CSS_SELECTOR, "head [type='text/css']")
+                for i in fontFaceItem:
+                    strData = i.get_attribute('innerHTML')
+                    if strData == "":
+                        continue
+                    else:
+                        try:
+                            fontFaceStr = re.findall(";base64,(.*)'[)] format", strData)[0]
+                            break
+                        except Exception as e:
+                            print("当前 fontFace 无法解析：" + str(e), flush=True)
+                            print('当前题目中含有字母或数学特殊符号，无法识别，请选择其他科目进行答题', flush=True)
+                            continue
+                break
+            except StaleElementReferenceException:
+                # 页面正在刷新/切换，稍等后整体重查
+                time.sleep(1)
         if self._statusCode == 1:
             if fontFaceStr == "":
                 # raise Exception("当前任务点无法获取 font_face 值")
