@@ -15,7 +15,7 @@ from task.tool import color
 import sys
 import io
 from task.tool.ai_wen_da import main,AnswerAPI,Question
-from task.tool.DeepSeekAsk import DeepSeekAsk
+from task.tool.AIAsk import AIAsk
 from task.tool.send_wx import send_error
 
 # 设置默认编码为UTF-8
@@ -197,13 +197,13 @@ class Answer:
             if not answer:
                 self.no_answer_dit[i] = self.all_title_dit[i]
         if len(self.no_answer_dit) > 0:
-            print(color.red('正在使用deepseek搜题，请耐心等待...'), flush=True)
+            print(color.red('正在使用AI搜题，请耐心等待...'), flush=True)
             title = ''
             num = 0
             for no_answer_title in self.no_answer_dit.values():
                 title += no_answer_title
             try:
-                answers = DeepSeekAsk(self.API_KEY, title, 'all', api_url=self.API_URL, api_model=self.API_MODEL)
+                answers = AIAsk(self.API_KEY, title, 'all', api_url=self.API_URL, api_model=self.API_MODEL)
                 if not answers or answers.strip() in ('[]', ''):
                     # AI 请求失败返回 '[]'：视为无答案，留空跳过，不填脏数据
                     print(color.red('AI 兜底未返回有效答案，无答案的题将留空'), flush=True)

@@ -1,3 +1,9 @@
+"""AIAsk —— 通用 AI 答题封装（OpenAI 兼容接口，任意厂商/中转站可用）
+
+由 DeepSeekAsk 更名而来：实际支持任意 OpenAI 风格 API（DeepSeek、
+智谱、中转站等），默认配置仅为无配置时的兜底。
+兼容别名：DeepSeekAsk = AIAsk（老代码/第三方引用不受影响）
+"""
 import json
 import os
 import random
@@ -98,7 +104,7 @@ def get_model(api_model=None, api_url=None, api_key=None):
     return DEFAULT_MODELS[0]
 
 
-def DeepSeekAsk(API_KEY, title, _type, api_url=None, api_model=None):
+def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
     """通用 AI 答题函数（兼容任意 OpenAI 风格接口）
 
     :param API_KEY: API 密钥
@@ -119,7 +125,7 @@ def DeepSeekAsk(API_KEY, title, _type, api_url=None, api_model=None):
         prompt = ('不要其他话语，我仅仅需要这些题目的选择答案哟，返回的答案必须是列表格式，列表中的每个元素都是字符串,'
                   '答案必须从给你的选项中选择，可以选择多个答案，不能自己编造答案,'
                   '最终你给出的答案格式应当类似于下面这样：["答案1","答案2",...]\n')
-    elif _type in ['简答题', '论述题', '填空题']:
+    elif _type in ['简答题', '论述题']:
         prompt = ('不要其他话语，我仅仅需要这些题目的选择答案哟，返回的答案必须是列表格式，列表中的每个元素都是字符串,'
                   '只需给出文字答案即可,不要有多余的内容,答案要都在列表内，不要在列表后再加什么内容,'
                   '最终你给出的答案格式应当类似于下面这样：["答案"]\n')
@@ -235,3 +241,6 @@ def DeepSeekAsk(API_KEY, title, _type, api_url=None, api_model=None):
         answer = match.group(0)
     print(answer, flush=True)
     return answer
+
+# 兼容别名：历史代码/第三方以 DeepSeekAsk 引用
+DeepSeekAsk = AIAsk

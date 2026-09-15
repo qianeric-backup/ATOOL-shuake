@@ -10,7 +10,7 @@ import pickle
 import os
 import asyncio
 import ast
-from task.tool.DeepSeekAsk import DeepSeekAsk
+from task.tool.AIAsk import AIAsk
 
 
 @dataclass
@@ -626,7 +626,7 @@ class AutoAnswer:
         start_time = time.time()
         typ_dict = {'0': '单选题', '1': '多选题', '2': '填空题', '3': '判断题', '9': '简答题'}
         title = "【" + typ_dict[question.type] + "】" + question.question + str(question.options)
-        answer = DeepSeekAsk(api, title,typ_dict[question.type], api_url=question.API_URL, api_model=question.API_MODEL)
+        answer = AIAsk(api, title,typ_dict[question.type], api_url=question.API_URL, api_model=question.API_MODEL)
         if type(answer) is str:
             try:
                 answer = ast.literal_eval(answer)  # 转换为列表

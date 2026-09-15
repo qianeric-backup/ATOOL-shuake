@@ -6,7 +6,7 @@ import ast
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-from task.tool.DeepSeekAsk import DeepSeekAsk
+from task.tool.AIAsk import AIAsk
 import time
 from task.do_work import turn_page
 from task.tool.common import Common
@@ -29,7 +29,7 @@ class Discussion(Common):
                 replyContent = choice_replay.find_element(By.CLASS_NAME, 'replyContent').text
                 self.answer = [replyContent]
             else:
-                self.answer = DeepSeekAsk(self.API, self.question, '简答题', api_url=self.API_URL, api_model=self.API_MODEL)
+                self.answer = AIAsk(self.API, self.question, '简答题', api_url=self.API_URL, api_model=self.API_MODEL)
 
 
     def start(self):

@@ -10,7 +10,7 @@ import ast
 
 from selenium.webdriver.common.action_chains import ActionChains
 
-from task.tool.DeepSeekAsk import DeepSeekAsk
+from task.tool.AIAsk import AIAsk
 from task.tool import color
 from task.tool import runtime_flags
 import pyautogui
@@ -54,7 +54,7 @@ def check_internet(driver):
 def get_answer(API,question,typ,api_url='',api_model=''):
     answer = []
     try:
-        answer = DeepSeekAsk(API, question, typ, api_url=api_url, api_model=api_model)
+        answer = AIAsk(API, question, typ, api_url=api_url, api_model=api_model)
     except Exception as e:
         print(f'答题时出错了{e}',flush=True)
     return answer
