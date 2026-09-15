@@ -419,7 +419,9 @@ def click_next_page(driver, pass_face):
 def run(driver,choice,course_name,API,lock_screen,pass_face,video_title_choice,discussion_choice,after_finish_question,
          API_URL='', API_MODEL=''):
     study_fail = 0
+    page_fail = 0
     while True:
+      try:
         cond=True
         print(color.green('正在检测页面内容'), flush=True)
         page_message_dict=page_message(driver)
@@ -473,12 +475,36 @@ def run(driver,choice,course_name,API,lock_screen,pass_face,video_title_choice,d
                 driver.find_element(By.XPATH, '//*[@id="mainid"]/div[1]/div/div[3]/a[2]').click()
             except:
                 pass
+            page_fail = 0   # 成功翻页清零连续页错误
         else:
             if pass_face==1:
                 delete_face_popup(driver)
                 delete_face_popup(driver,'maskDiv1 starttippop faceRecognition_1 chapterVideoFaceMaskDiv')
             fold(driver)
         time.sleep(1)
+      except Exception:
+        # 单页异常兜底：打印堆栈并刷新重试本页，绝不冒泡终止整课；
+        # 连续 5 页失败才停止，避免空转
+        traceback.print_exc()
+        page_fail += 1
+        study_fail = 0
+        try:
+            driver.switch_to.default_content()
+        except Exception:
+            pass
+        try:
+            driver.refresh()
+        except Exception:
+            pass
+        if pass_face==1:
+            delete_face_popup(driver)
+            delete_face_popup(driver,'maskDiv1 starttippop faceRecognition_1 chapterVideoFaceMaskDiv')
+        fold(driver)
+        if page_fail >= 5:
+            print(color.red('连续 5 页处理失败，终止本课程（错误详情见上方堆栈）'), flush=True)
+            break
+        print(color.red(f'本页处理出错（连续第 {page_fail} 次），已刷新重试，详情见上方堆栈'), flush=True)
+        time.sleep(3)
 
 def _crx_to_xpi(crx_path, tmp_dir):
     """把 Chrome .crx 扩展转换为 Firefox 可安装的 .xpi。
@@ -880,11 +906,13 @@ def run_main():
             print(color.red('❌ 你网都没连，刷个屁的课啊'),flush=True)
         else:
             print(color.red('❌ 出错了，具体原因请前往错误日志查看'),flush=True)
-            error_msg = traceback.format_exc()
+            with open('error.log', 'a', encoding='utf-8') as f:
+                f.write(time.strftime('%Y-%m-%d %H:%M:%S') + ' - ERROR: ' + traceback.format_exc() + '\n')
     except PermissionError:
         print(color.red('请关闭该窗口后，再右键点击刷课程序用管理员权限打开'))
     except Exception as e:
-        error_msg = traceback.format_exc()
+        with open('error.log', 'a', encoding='utf-8') as f:
+            f.write(time.strftime('%Y-%m-%d %H:%M:%S') + ' - ERROR: ' + traceback.format_exc() + '\n')
         print(color.red('❌ 出错了，具体原因请前往错误日志查看'),flush=True)
 
 if __name__ == '__main__':
