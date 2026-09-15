@@ -72,13 +72,18 @@ def get_model_list(api_url=None, api_key=None):
 def get_model(api_model=None, api_url=None, api_key=None):
     """选择要使用的模型
 
-    1. 用户显式指定的模型优先；
-    2. 否则从接口自动获取模型列表，优先挑选 chat/对话类模型；
-    3. 获取失败或列表为空时回退默认模型。
+    1. 调用方显式指定的模型优先；
+    2. 其次配置文件 account_info.json 里用户填写的 API_MODEL
+       （中转站常不提供 /models 接口，此时只能靠用户手填）；
+    3. 再从接口自动获取模型列表，优先挑选 chat/对话类模型；
+    4. 全部失败才回退官方默认模型。
     """
     config = _load_config()
     if api_model and str(api_model).strip():
         return str(api_model).strip()
+    cfg_model = str(config.get('API_MODEL', '') or '').strip()
+    if cfg_model:
+        return cfg_model
     if not api_key:
         api_key = config.get('API', '')
     model_list = get_model_list(api_url, api_key)

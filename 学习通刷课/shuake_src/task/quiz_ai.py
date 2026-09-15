@@ -204,6 +204,11 @@ class Answer:
                 title += no_answer_title
             try:
                 answers = DeepSeekAsk(self.API_KEY, title, 'all', api_url=self.API_URL, api_model=self.API_MODEL)
+                if not answers or answers.strip() in ('[]', ''):
+                    # AI 请求失败返回 '[]'：视为无答案，留空跳过，不填脏数据
+                    print(color.red('AI 兜底未返回有效答案，无答案的题将留空'), flush=True)
+                    self.no_answer_dit.clear()
+                    return
                 # answers='C/B/ABCD/ABCD/实体经济/'
                 parts = re.split(r'/', answers)
                 for key, no_answer_title in self.no_answer_dit.items():
