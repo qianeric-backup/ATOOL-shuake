@@ -164,6 +164,7 @@ class StartWindow(QMainWindow):
     courses_fetched = Signal(list, str)  # (course_names, error_msg)
     api_tested = Signal(str, str)        # (result_msg, kind)  测试连接结果
     log_signal = Signal(str)             # 跨线程安全写日志（刷课子进程线程 → UI）
+    program_finished = Signal()          # 刷课子进程结束（线程 → UI 恢复按钮）
 
     def __init__(self):
         super().__init__()
@@ -635,6 +636,7 @@ class StartWindow(QMainWindow):
         self.models_fetched.connect(self._apply_models)
         self.api_tested.connect(self._apply_api_test)
         self.log_signal.connect(self._append_log)
+        self.program_finished.connect(self.restore_buttons)
         self.courses_fetched.connect(self._apply_courses)
 
         self.pass_face_label = QLabel('跳过人脸:')
@@ -1429,8 +1431,8 @@ class StartWindow(QMainWindow):
         else:
             cmd = [sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'main.py')]
         threading.Thread(target=self.run_program, args=(cmd,), daemon=True).start()
-        # 5 秒后恢复按钮（原版行为）
-        QTimer.singleShot(5000, self.restore_buttons)
+        # 按钮保持「结束刷课」状态，直到子进程真正结束（run_program 发
+        # program_finished 信号恢复），不再定时 5 秒无条件复位
 
     def restore_buttons(self):
         self.start_button.show()
@@ -1483,6 +1485,7 @@ class StartWindow(QMainWindow):
         self.process = None
         if self.process_condition:
             self.log_signal.emit('\n刷课子进程已结束')
+        self.program_finished.emit()   # 子进程结束，恢复「开始刷课」按钮
 
     @staticmethod
     def _strip_ansi(text):
