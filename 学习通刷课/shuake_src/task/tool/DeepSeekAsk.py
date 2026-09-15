@@ -156,13 +156,33 @@ def DeepSeekAsk(API_KEY, title, _type, api_url=None, api_model=None):
 
     message = {"role": "user", "content": prompt}
 
-    # 请求策略：默认环境 → 2 秒后重试 → 清除代理环境变量直连。
-    # 覆盖两类常见 Connection error：网络抖动、桌面代理变量指向
-    # 已关闭/故障的本地代理（httpx trust_env 默认继承这些变量）
+    def _curl_ask():
+        """终极兜底：用系统 curl 发请求。
+        当 Clash/TUN 等按进程名分流（python 走故障节点、curl 直连）、
+        或 httpx/OpenAI SDK 自身网络栈异常时，curl 通常仍可直达"""
+        import subprocess
+        payload = json.dumps({"model": model, "messages": [message],
+                              "temperature": 1.3, "stream": False})
+        cmd = ['curl', '-sS', '--max-time', '90', '-X', 'POST',
+               f'{api_url}/chat/completions',
+               '-H', f'Authorization: Bearer {API_KEY}',
+               '-H', 'Content-Type: application/json',
+               '-d', payload]
+        proc = subprocess.run(cmd, capture_output=True, timeout=100)
+        out = proc.stdout.decode('utf-8', errors='replace')
+        data = json.loads(out)
+        # 错误应答两种形态：OpenAI 风格 {"error": {...}}、
+        # 网关风格 {"code": "...", "message": "..."}（无 choices）
+        if 'choices' not in data:
+            raise RuntimeError(f"curl 收到错误应答: {str(data)[:120]}")
+        return data['choices'][0]['message']['content']
+
+    # 请求策略：默认环境 → 重试 → 清代理环境变量直连 → 系统 curl。
+    # 覆盖：网络抖动、残留代理变量、Clash TUN 按进程分流、SDK 栈异常
     _PROXY_KEYS = ('http_proxy', 'https_proxy', 'all_proxy',
                    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
                    'no_proxy', 'NO_PROXY')
-    attempts = ('默认环境', '重试', '清代理直连')
+    attempts = ('默认环境', '重试', '清代理直连', 'curl 兜底')
     answer = None
     last_err = None
     for label in attempts:
@@ -172,6 +192,10 @@ def DeepSeekAsk(API_KEY, title, _type, api_url=None, api_model=None):
                 if k in os.environ:
                     saved[k] = os.environ.pop(k)
         try:
+            if label == 'curl 兜底':
+                answer = _curl_ask()
+                print(color.green('AI 请求成功（curl 兜底通道）'), flush=True)
+                break
             client = OpenAI(api_key=API_KEY, base_url=api_url, timeout=60, max_retries=1)
             response = client.chat.completions.create(
                 model=model,
