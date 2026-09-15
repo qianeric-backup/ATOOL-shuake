@@ -616,7 +616,10 @@ def run_main():
     try:
         with open(r'task/tool/account_info.json', 'r', encoding='utf-8') as fil:
             account_info = json.load(fil)
-        main(account_info['browser'], account_info['driver_path'], account_info['phone_number'], account_info['password'],account_info['choice'],
+        # 浏览器未设置时按平台取默认：Windows→edge，Linux/macOS→firefox
+        browser = (account_info.get('browser') or ''
+                   or ('edge' if os.name == 'nt' else 'firefox'))
+        main(browser, account_info.get('driver_path', ''), account_info['phone_number'], account_info['password'],account_info['choice'],
             account_info['cour'],account_info['API'],account_info['after_finish_question'],account_info['lock_screen'],account_info['speed'],account_info['task_type'],
              account_info['homework'],account_info['pass_face'],account_info['video_title_choice'],account_info['discussion_choice'],
              account_info.get('API_URL',''), account_info.get('API_MODEL',''))

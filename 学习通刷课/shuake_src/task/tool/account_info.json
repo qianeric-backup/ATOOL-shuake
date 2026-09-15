@@ -1,6 +1,6 @@
 {
-  "browser": "firefox",
-  "driver_path": "/home/qianeric/文档/code_project/ATOOL-shuake-main/学习通刷课/shuake_src/../geckodriver/geckodriver",
+  "browser": "",
+  "driver_path": "",
   "phone_number": "",
   "password": "",
   "cour": [],

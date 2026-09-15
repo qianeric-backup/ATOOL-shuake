@@ -433,6 +433,8 @@ class StartWindow(QMainWindow):
         self._form_label('浏览器:', 0, gl)
         self.browser_entry = QComboBox()
         self.browser_entry.addItems(['edge', 'chrome', 'firefox'])
+        # 未加载配置前的平台默认（Windows→edge，Linux→firefox），并自动填默认驱动
+        self.browser_entry.setCurrentText(self._default_browser())
         self.browser_entry.currentTextChanged.connect(self.auto_fill_browser_driver)
         gl.addWidget(self._input_widget(self.browser_entry), 0, 1, Qt.AlignmentFlag.AlignLeft)
         self._form_label('驱动地址:', 1, gl)
@@ -1483,6 +1485,11 @@ class StartWindow(QMainWindow):
         return re.sub(r'\x1b\[[0-9;]*m', '', text)
 
     # ---------------------------------------------------------------- 设置回调
+    @staticmethod
+    def _default_browser():
+        """平台默认浏览器：Windows→edge，Linux/macOS→firefox"""
+        return 'edge' if os.name == 'nt' else 'firefox'
+
     def _driver_candidates(self, driver_kind):
         """返回候选驱动路径列表（跨平台：Windows 用 .exe，Linux/macOS 用无后缀可执行文件）"""
         if driver_kind == 'edge':
@@ -1781,9 +1788,12 @@ class StartWindow(QMainWindow):
             # （与 main._find_project_driver 的运行时解析链一致；Linux 默认填的
             # 裸名 "geckodriver" 即落在 学习通刷课/geckodriver/geckodriver）
             ok = os.path.isfile(drv) or shutil.which(drv) is not None
-            if not ok and os.name != 'nt':
+            if not ok:
+                # 项目约定驱动目录兜底（Windows/Linux 通用；.exe 后缀不敏感）
+                drv_base = os.path.basename(drv).lower()
                 for cand in self._driver_candidates(browser.strip().lower()):
-                    if os.path.basename(cand) == os.path.basename(drv):
+                    cand_base = os.path.basename(cand).lower()
+                    if cand_base in (drv_base, drv_base + '.exe'):
                         # 解析成功：把输入框回填为解析出的绝对路径，保存的配置更具体
                         drv = cand
                         self.browser_driver_entry.setText(cand)
@@ -1857,6 +1867,10 @@ class StartWindow(QMainWindow):
     def load_data(self):
         data = load_account()
         if not data:
+            # 全新配置：按平台填默认浏览器与驱动（Windows→edge，Linux→firefox）
+            browser = self._default_browser()
+            self.browser_entry.setCurrentText(browser)
+            self.auto_fill_browser_driver(browser)
             return
         self.account_info = data
         self._suppress_signals = True
@@ -1878,20 +1892,22 @@ class StartWindow(QMainWindow):
         self.cour_entry.addItems(courses or [first or ''])
         self.cour_entry.setCurrentText(first or '')
 
-        self.browser_entry.setCurrentText(data.get('browser', 'edge'))
-        # Linux 端驱动路径兼容：旧配置里的 Windows 路径（C:\...、*.exe）在本机无效时，
-        # 自动回填该浏览器在 Linux 下的默认驱动（firefox 默认 geckodriver）
-        saved_browser = data.get('browser', 'edge')
-        saved_driver = data.get('driver_path', '')
-        if os.name != 'nt' and saved_driver:
-            usable = os.path.isfile(saved_driver) or shutil.which(saved_driver)
-            if not usable and ('\\' in saved_driver
-                               or saved_driver.lower().endswith('.exe')):
-                self.auto_fill_browser_driver(saved_browser)
-            else:
-                self.browser_driver_entry.setText(saved_driver)
-        else:
+        # 浏览器缺省按平台：Windows→edge，Linux/macOS→firefox
+        saved_browser = (data.get('browser') or '').strip().lower()
+        if saved_browser not in ('edge', 'chrome', 'firefox'):
+            saved_browser = self._default_browser()
+        self.browser_entry.setCurrentText(saved_browser)  # 触发 auto_fill 填默认驱动
+        # 驱动路径跨平台兼容：本机解析不了（另一平台保存的路径/裸名在本机缺失）时，
+        # 自动回填该浏览器在本机的默认驱动（Windows→*.exe，Linux→系统/项目驱动）
+        saved_driver = (data.get('driver_path') or '').strip()
+        if saved_driver:
             self.browser_driver_entry.setText(saved_driver)
+            usable = (os.path.isfile(saved_driver)
+                      or shutil.which(saved_driver) is not None)
+            if not usable:
+                self.auto_fill_browser_driver(saved_browser)
+        elif not self.browser_driver_entry.text().strip():
+            self.auto_fill_browser_driver(saved_browser)
         self.phone_number_entry.setText(data.get('phone_number', ''))
         self.password_entry.setText(data.get('password', ''))
         self.speed_entry.setCurrentText(data.get('speed', '2'))

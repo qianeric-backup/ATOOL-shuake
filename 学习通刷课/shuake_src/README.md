@@ -37,15 +37,44 @@ pip install selenium pyautogui requests PySide6 colorama openai", "old_string": 
 
 ## 配置说明
 
-1. **浏览器与驱动**：在「设置 → 配置设置」中选择浏览器（edge / chrome / firefox），并选择与浏览器版本匹配的驱动文件。
-   - Chrome 驱动：https://googlechromelabs.github.io/chrome-for-testing/
-   - Edge 驱动：https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/
-   - Firefox 驱动：https://github.com/mozilla/geckodriver/releases
+### 平台默认浏览器与驱动
 
-2. **API 设置**：在「设置 → 高级设置」中填写：
-   - `API Key`：你的 API 密钥（支持任意 OpenAI 兼容接口）。
-   - `API 地址`：接口 base URL，留空则使用默认 `https://api.deepseek.com`。
-   - `模型名`：**可下拉选择**，填写 API 地址后程序会自动拉取该接口的全部可用模型；也支持手动输入。
+未保存过配置时，应用按平台自动选择默认浏览器并回填默认驱动：
+
+| 平台 | 默认浏览器 | 默认驱动（按顺序自动探测） |
+|---|---|---|
+| **Windows** | **Edge** | 项目目录 `edgedriver_win64\msedgedriver.exe` → 系统 PATH → Selenium Manager 自动下载 |
+| **Linux / macOS** | **Firefox** | 项目目录 `学习通刷课/geckodriver/geckodriver` → `/usr/bin`、`/usr/local/bin`、`/snap/bin` → 系统 PATH → Selenium Manager |
+
+- 设置页切换浏览器时，驱动输入框自动回填对应平台的默认值；
+- 载入在另一平台保存的配置时（如 Windows 配置拿到 Linux 上用），本机解析不了的驱动会自动修正为本机默认；
+- 保存配置时的驱动校验与运行时解析链一致：真实文件 → 系统 PATH → 项目约定目录。
+
+### 驱动下载（必须与浏览器主版本一致）
+
+**Windows**
+
+| 浏览器 | 驱动 | 下载地址 | 放置位置 |
+|---|---|---|---|
+| Edge（默认） | msedgedriver.exe | https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/ | `edgedriver_win64\msedgedriver.exe`，或任意位置后在设置中填绝对路径，或加入 PATH |
+| Chrome | chromedriver.exe | https://googlechromelabs.github.io/chrome-for-testing/ | `chromedriver\chromedriver.exe` |
+| Firefox | geckodriver.exe | https://github.com/mozilla/geckodriver/releases | `geckodriver\geckodriver.exe` |
+
+**Linux（Debian/Ubuntu/Mint）**
+
+| 浏览器 | 驱动 | 安装方式 |
+|---|---|---|
+| Firefox（默认） | geckodriver | `sudo apt install firefox-geckodriver`（装到 `/usr/bin/geckodriver`）；或从 https://github.com/mozilla/geckodriver/releases 下载 `geckodriver-vX.Y.Z-linux64.tar.gz` 解压到 `学习通刷课/geckodriver/geckodriver` 并 `chmod +x` |
+| Chromium | chromedriver | `sudo apt install chromium-driver` |
+| Edge | msedgedriver | 手动下载 linux64 版（地址同上 Edge 行），解压到 PATH |
+
+**版本匹配规则**：驱动主版本号必须等于浏览器主版本号（如 Edge 131 ↔ msedgedriver 131.x、Firefox 155 ↔ geckodriver 0.36+）。版本不匹配时程序会在日志中打印当前/期望版本与下载链接。macOS 下载对应 mac 平台包即可，要求相同。
+
+### API 设置
+
+- `API Key`：你的 API 密钥（支持任意 OpenAI 兼容接口）。
+- `API 地址`：接口 base URL，留空则使用默认 `https://api.deepseek.com`。
+- `模型名`：**可下拉选择**，填写 API 地址后程序会自动拉取该接口的全部可用模型；也支持手动输入。
 
 ### 模型列表自动获取（多协议自适应）
 
