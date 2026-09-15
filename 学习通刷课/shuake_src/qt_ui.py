@@ -163,6 +163,7 @@ class StartWindow(QMainWindow):
     # 课程列表拉取完成信号（跨线程安全）
     courses_fetched = Signal(list, str)  # (course_names, error_msg)
     api_tested = Signal(str, str)        # (result_msg, kind)  测试连接结果
+    log_signal = Signal(str)             # 跨线程安全写日志（刷课子进程线程 → UI）
 
     def __init__(self):
         super().__init__()
@@ -633,6 +634,7 @@ class StartWindow(QMainWindow):
         gl.addWidget(self.api_status_label, self.api_status_row, 1, Qt.AlignmentFlag.AlignLeft)
         self.models_fetched.connect(self._apply_models)
         self.api_tested.connect(self._apply_api_test)
+        self.log_signal.connect(self._append_log)
         self.courses_fetched.connect(self._apply_courses)
 
         self.pass_face_label = QLabel('跳过人脸:')
@@ -827,33 +829,32 @@ class StartWindow(QMainWindow):
             traceback.print_exc()
             self.courses_fetched.emit([], '拉取课程失败: ' + str(e))
 
+    def _fill_course_combos(self, courses):
+        """填充三个课程下拉框，并尽量保持各框当前选中项不变
+        （修复：设置里选了第 N 门课，保存后跳回第一门的问题）"""
+        widgets = (self.cour_entry, self.course_vido_entry, self.course_score_entry)
+        keeps = [w.currentText() for w in widgets]
+        for w, keep in zip(widgets, keeps):
+            w.clear()
+            w.addItems(courses)
+            if keep and keep in courses:
+                w.setCurrentText(keep)
+            elif courses:
+                w.setCurrentText(courses[0])
+
     def _apply_courses(self, courses, err):
         """主线程：课程拉取完成后刷新课程下拉框"""
         self.fetch_course_button.setEnabled(True)
         self.fetch_course_button.setToolTip('')
         if courses:
-            self.cour_entry.clear()
-            self.cour_entry.addItems(courses)
-            if courses:
-                self.cour_entry.setCurrentText(courses[0])
-            # 同步刷新刷课日志/成绩页的课程下拉框
-            self.course_vido_entry.clear()
-            self.course_vido_entry.addItems(courses)
-            self.course_score_entry.clear()
-            self.course_score_entry.addItems(courses)
+            self._fill_course_combos(courses)
             self._set_status(f'获取到 {len(courses)} 门课程', 'ok')
         else:
             # 兜底：拉取失败时载入该手机号的历史课程，下拉框不至于一直为空
             phone = self.phone_number_entry.text().strip()
             cached = load_course_names().get(phone, []) if phone else []
             if cached:
-                self.cour_entry.clear()
-                self.cour_entry.addItems(cached)
-                self.cour_entry.setCurrentText(cached[0])
-                self.course_vido_entry.clear()
-                self.course_vido_entry.addItems(cached)
-                self.course_score_entry.clear()
-                self.course_score_entry.addItems(cached)
+                self._fill_course_combos(cached)
                 self._set_status(f'本次拉取失败（{err or "未知错误"}），已载入 {len(cached)} 门历史课程', 'error')
             else:
                 self._set_status('课程拉取失败: ' + (err or '未知错误'), 'error')
@@ -866,13 +867,7 @@ class StartWindow(QMainWindow):
             return
         courses = load_course_names().get(phone, [])
         if courses:
-            self.cour_entry.clear()
-            self.cour_entry.addItems(courses)
-            self.cour_entry.setCurrentText(courses[0])
-            self.course_vido_entry.clear()
-            self.course_vido_entry.addItems(courses)
-            self.course_score_entry.clear()
-            self.course_score_entry.addItems(courses)
+            self._fill_course_combos(courses)
             self._set_status(f'已加载该手机号 {len(courses)} 门历史课程', 'ok')
         else:
             self._set_status('该手机号暂无历史课程，可点击「拉取课程」从学习通获取', 'idle')
@@ -1469,7 +1464,7 @@ class StartWindow(QMainWindow):
                 break
             if line:
                 text = self._strip_ansi(line.decode('utf-8', errors='ignore'))
-                self._append_log(text)
+                self.log_signal.emit(text)   # 跨线程经信号写 UI，禁止直调 QTextEdit
         self.process.stdout.close()
         try:
             self.process.wait()
@@ -1477,7 +1472,7 @@ class StartWindow(QMainWindow):
             pass
         self.process = None
         if self.process_condition:
-            QTimer.singleShot(0, self._append_log, '\n刷课子进程已结束')
+            self.log_signal.emit('\n刷课子进程已结束')
 
     @staticmethod
     def _strip_ansi(text):

@@ -222,7 +222,7 @@ def check_vido_finish(driver,i,time_start,total_time,vido_iframe,lock_screen,API
         # handle_video_error_alert(driver)
         driver.switch_to.default_content()
         driver.switch_to.frame('iframe')
-        elements2 = driver.find_elements(By.CLASS_NAME, 'ans-job-icon-clear ')
+        elements2 = driver.find_elements(By.CSS_SELECTOR, '.ans-job-icon-clear')
         element2 = elements2[i]
         # 定位到该元素的上一级（父元素）
         parent_element2 = element2.find_element(By.XPATH, "..")
@@ -270,12 +270,14 @@ def study_page(driver,course_name,lock_screen,API,video_title_choice,api_url='',
     cond=False
     driver.switch_to.default_content()
     driver.switch_to.frame('iframe')
-    try:
-        # 判断是否完成任务
-        elements1 = driver.find_elements(By.CLASS_NAME, 'ans-job-icon-clear ')
-        print(color.magenta(f'已检测到{len(elements1)}个视频包含有任务点'),flush=True)
-    except:
-        pyautogui.scroll(-250)
+    # 判断是否完成任务
+    # 注意：类名必须用 CSS_SELECTOR（By.CLASS_NAME 含空格会抛 Compound class names 异常，
+    # 导致每个视频页都"出错了，刷新一下"）
+    elements1 = driver.find_elements(By.CSS_SELECTOR, '.ans-job-icon-clear')
+    print(color.magenta(f'已检测到{len(elements1)}个视频包含有任务点'),flush=True)
+    if not elements1:
+        # 页面无可播放任务：在浏览器内滚动而非 pyautogui（避免 X11 依赖）
+        driver.execute_script('window.scrollBy(0, 250);')
         print(color.green('视频已完成,点击下一节'),flush=True)
         return
 

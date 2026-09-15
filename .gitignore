@@ -38,6 +38,11 @@ venv/
 学习通刷课/shuake_src/MicrosoftEdge/
 学习通刷课/shuake_src/msedgedriver/
 
+# 运行时用户数据（含登录凭据/账号配置/课程缓存，绝不入库）
+学习通刷课/shuake_src/task/tool/cookies.pkl
+学习通刷课/shuake_src/task/tool/account_info.json
+学习通刷课/shuake_src/task/tool/course_name.json
+
 # Wine 交叉构建环境（Windows Python prefix / 构建中间产物，共 ~3.7GB）
 wine-build/
 台账.txt

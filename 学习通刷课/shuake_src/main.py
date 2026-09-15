@@ -87,7 +87,8 @@ def save_course_lst(driver,class_name,course_elements,phone_number):
         have_task_course_element=driver
     try:
         new_course_elements=have_task_course_element.find_elements(By.CSS_SELECTOR, f'[class="{class_name}"]')
-        if len(course_elements)==0:
+        if len(new_course_elements)==0:
+            # 容器内查不到时回退到外层已找到的课程元素（条件原写反导致误报"获取课程列表失败"）
             new_course_elements=course_elements
         course_list = [course_element.get_attribute('title') for course_element in new_course_elements if
                        course_element.get_attribute('title')!= '']
@@ -372,6 +373,7 @@ def click_next_page(driver, pass_face):
 
 def run(driver,choice,course_name,API,lock_screen,pass_face,video_title_choice,discussion_choice,after_finish_question,
          API_URL='', API_MODEL=''):
+    study_fail = 0
     while True:
         cond=True
         print(color.green('正在检测页面内容'), flush=True)
@@ -397,11 +399,20 @@ def run(driver,choice,course_name,API,lock_screen,pass_face,video_title_choice,d
                 reading(driver,page_message_dict['阅读'])
             if '视频' in page_message_dict.keys():
                 try:
-                    study_page(driver,course_name,lock_screen,API,video_title_choice,API_URL=API_URL,API_MODEL=API_MODEL)
-                except:
+                    study_page(driver,course_name,lock_screen,API,video_title_choice,api_url=API_URL,api_model=API_MODEL)
+                    study_fail = 0   # 处理成功才清零连续失败计数
+                except Exception:
+                    # 打印完整堆栈便于诊断，不再吞错误
+                    traceback.print_exc()
+                    study_fail += 1
                     driver.refresh()
-                    print(color.red('出错了，刷新一下'),flush=True)
-                    cond=False
+                    if study_fail >= 5:
+                        print(color.red('该页连续 5 次处理失败，跳过此页'), flush=True)
+                        study_fail = 0
+                        cond = True   # 强制跳下一页，避免无限刷新
+                    else:
+                        print(color.red(f'出错了，刷新一下（连续第 {study_fail} 次，错误详情见上方堆栈）'), flush=True)
+                        cond = False
             if '测验' in page_message_dict.keys():
                 if choice!='不刷题':
                     finish_quiz(driver, course_name, API, choice,after_finish_question,API_URL=API_URL,API_MODEL=API_MODEL)
@@ -423,6 +434,45 @@ def run(driver,choice,course_name,API,lock_screen,pass_face,video_title_choice,d
                 delete_face_popup(driver,'maskDiv1 starttippop faceRecognition_1 chapterVideoFaceMaskDiv')
             fold(driver)
         time.sleep(1)
+
+def _crx_to_xpi(crx_path, tmp_dir):
+    """把 Chrome .crx 扩展转换为 Firefox 可安装的 .xpi。
+    步骤：剥离 CRX 头（v2/v3）→ 校验内层 zip → 若是 MV3 service_worker
+    背景则移除 background 字段（Firefox 不支持 SW；倍速/防暂停的核心
+    逻辑都在 content_scripts，不受影响）→ 重打包为 .xpi"""
+    import io
+    import zipfile
+    with open(crx_path, 'rb') as f:
+        data = f.read()
+    if data[:4] != b'Cr24':
+        return crx_path  # 不是 CRX（本身就是 zip/xpi），原样返回
+    version = int.from_bytes(data[4:8], 'little')
+    if version == 3:
+        zip_start = 12 + int.from_bytes(data[8:12], 'little')
+    elif version == 2:
+        pubkey_len = int.from_bytes(data[8:12], 'little')
+        sig_len = int.from_bytes(data[12:16], 'little')
+        zip_start = 16 + pubkey_len + sig_len
+    else:
+        raise ValueError(f'不支持的 CRX 版本: {version}')
+    zin = zipfile.ZipFile(io.BytesIO(data[zip_start:]))
+    if 'manifest.json' not in zin.namelist():
+        raise ValueError('CRX 内未找到 manifest.json')
+    manifest = json.loads(zin.read('manifest.json'))
+    mf_changed = False
+    bg = manifest.get('background') or {}
+    if 'service_worker' in bg:
+        manifest.pop('background')
+        mf_changed = True
+    xpi_path = os.path.join(
+        tmp_dir, os.path.splitext(os.path.basename(crx_path))[0] + '.xpi')
+    with zipfile.ZipFile(xpi_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            payload = zin.read(item.filename)
+            if mf_changed and item.filename == 'manifest.json':
+                payload = json.dumps(manifest, ensure_ascii=False).encode()
+            zout.writestr(item, payload)
+    return xpi_path
 
 def _find_project_driver(name):
     """在项目约定目录里找裸驱动名（与 qt_ui._driver_candidates 的扫描位一致）：
@@ -468,14 +518,26 @@ def start_browser(browser,driver_path,speed):
     if browser == 'chrome':
         driver = webdriver.Chrome(service=service, options=options)
     elif browser == 'firefox':
-        # firefox 通过临时 addon 安装扩展
+        # firefox 不认 Chrome 的 .crx 格式（报 ERROR_CORRUPT_FILE），需剥离
+        # CRX 头转成 .xpi；且 Firefox 正式版拒绝未签名扩展的永久安装，
+        # 必须 temporary=True（geckodriver 的 profile 本身就是会话级的）
         driver = webdriver.Firefox(service=service, options=options)
-        try:
-            if speed!='1':
-                driver.install_addon(_path('task', 'tool', 'speed.crx'))
-            driver.install_addon(_path('task', 'tool', 'chrome-extension.crx'))
-        except Exception as e:
-            print(color.yellow(f'firefox 扩展安装失败（{e}），继续运行'), flush=True)
+        import tempfile
+        tmpdir = tempfile.mkdtemp(prefix='xpi_')
+        ext_plan = []
+        if speed != '1':
+            ext_plan.append(('speed.crx', '倍速'))
+        ext_plan.append(('chrome-extension.crx', '防暂停'))
+        for crx_name, purpose in ext_plan:
+            crx = _path('task', 'tool', crx_name)
+            if not os.path.isfile(crx):
+                continue
+            try:
+                xpi = _crx_to_xpi(crx, tmpdir)
+                driver.install_addon(xpi, temporary=True)
+                print(color.green(f'{purpose}扩展安装成功'), flush=True)
+            except Exception as e:
+                print(color.yellow(f'{purpose}扩展安装失败（{e}），继续运行'), flush=True)
     else:
         # 初始化Edge浏览器
         driver = webdriver.Edge(service=service, options=options)
