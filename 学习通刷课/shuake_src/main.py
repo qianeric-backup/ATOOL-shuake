@@ -391,6 +391,32 @@ def click_next_page(driver, pass_face):
     except ElementNotInteractableException:
         print(color.red('🎉 🎉 该课程全部已完结，撒花！！！'), flush=True)
         return False
+    except ElementClickInterceptedException:
+        # 下一页按钮被弹窗/浮层遮挡：清理人脸/提示弹窗后用 JS 强制点击
+        # （JS click 直接派发 DOM 事件，不受遮挡判定限制）
+        print(color.yellow('下一页按钮被弹窗遮挡，清理弹窗后 JS 点击'), flush=True)
+        try:
+            if pass_face == 1:
+                delete_face_popup(driver)
+                delete_face_popup(driver, 'maskDiv1 starttippop faceRecognition_1 chapterVideoFaceMaskDiv')
+        except Exception:
+            pass
+        try:
+            driver.implicitly_wait(0)
+            try:
+                driver.execute_script(
+                    "arguments[0].scrollIntoView({block: 'center'}); arguments[0].click();",
+                    driver.find_element(By.XPATH, NEXT_PAGE_XPATH))
+                return True
+            finally:
+                driver.implicitly_wait(2)
+        except Exception:
+            driver.refresh()
+            print(color.red('出错了，刷新一下'), flush=True)
+            if pass_face == 1:
+                delete_face_popup(driver)
+                delete_face_popup(driver, 'maskDiv1 starttippop faceRecognition_1 chapterVideoFaceMaskDiv')
+            fold(driver)
     # except ElementClickInterceptedException:
     #     print(color.red('点击被拦截，尝试将浏览器最大化,如果还是报错，请在下次打开浏览器后手动把浏览器最大化'), flush=True)
     #     driver.maximize_window()
