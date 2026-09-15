@@ -89,7 +89,7 @@ class do_work(Answer):
             self.title_and_option_element=self.questionList0[i]
             self.title_and_option_text =self.title_and_option_element.text
             self.questionType = self.questionList0[i].get_attribute('typename')
-            if self.questionType not in ['填空题','判断题','单选题','多选题','简答题','名词解释','论述题']:
+            if self.questionType not in ['填空题','判断题','单选题','多选题','简答题','名词解释','论述题','计算题']:
                 print(color.red(f'第{i+1}题题型为{self.questionType},无法作答'))
                 continue
             self.title = self.questionList0[i].find_element(By.CSS_SELECTOR, '[class="mark_name colorDeep fontLabel workTextWrap"]').text

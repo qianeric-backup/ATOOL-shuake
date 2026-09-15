@@ -32,6 +32,8 @@ QUESTION_TYPE_ALIAS = {
     'judgement': '判断题',
     'judge': '判断题',
     'shortanswer': '简答题',
+    'calculation': '计算题',
+    'calculate': '计算题',
     'completion': '填空题',
     'gapfilling': '填空题',
 }
@@ -149,7 +151,7 @@ class Answer:
                     self.title_and_option_element.find_elements(By.TAG_NAME, 'li'))
                 for option in self.title_and_option_element.find_elements(By.TAG_NAME, 'li'):
                     self.option_text_list.append(re.sub(r'\s+', '', self.decodeSecret.decode(option.text).strip()))
-            elif self.questionType in ['简答题', '论述题', '填空题','名词解释']:
+            elif self.questionType in ['简答题', '论述题', '填空题','名词解释', '计算题']:
                 self.all_optionWebElementList.append(None)
                 self.option_text_list  =['']
             else:
@@ -262,7 +264,7 @@ class Answer:
                         self.all_optionWebElementList[title_num][ans].click()
                 return True
 
-            elif self.questionType_list[title_num]=='简答题' or self.questionType_list[title_num]=='论述题' or self.questionType_list[title_num]=='名词解释':
+            elif self.questionType_list[title_num] in ('简答题', '论述题', '名词解释', '计算题'):
                 text_frame=self.questionList0[title_num].find_element(By.TAG_NAME,'iframe')
                 self.driver.switch_to.frame(text_frame)
                 p_element=self.driver.find_element(By.TAG_NAME,'p')
