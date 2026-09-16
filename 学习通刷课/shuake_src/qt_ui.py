@@ -21,6 +21,7 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 from datetime import datetime
 
 from PySide6.QtCore import Qt, QTimer, QUrl, Signal
@@ -203,8 +204,77 @@ class StartWindow(QMainWindow):
         self._apply_styles()
         self._reload_advanced()     # 按默认模式设置高级控件显隐
         self.load_data()            # 读取保存的配置
+        self._setup_io_menu()       # 顶部菜单：导入导出（配置/题库备份）
         self.update_time()
         self.show_main()
+
+    # ------------------------------------------------------------------ 导入导出
+    def _setup_io_menu(self):
+        """顶部菜单「导入导出」：备份/恢复配置与题库缓存"""
+        menu = self.menuBar().addMenu('导入导出')
+        for label, kind in (('导出全部（配置+题库）', 'all'),
+                            ('仅导出配置', 'config'),
+                            ('仅导出题库', 'bank')):
+            act = menu.addAction(label)
+            act.triggered.connect(lambda _checked=False, k=kind: self._export_data(k))
+        menu.addSeparator()
+        act = menu.addAction('导入（自动识别类型）')
+        act.triggered.connect(self._import_data)
+
+    def _export_data(self, kind):
+        from task.tool import config_io
+        default_name = 'xuexitong-backup-' + time.strftime('%Y%m%d-%H%M%S') + '.json'
+        path, _ = QFileDialog.getSaveFileName(self, '导出备份', default_name,
+                                              '备份文件 (*.json)')
+        if not path:
+            return
+        builders = {'all': config_io.export_all,
+                    'config': config_io.export_config,
+                    'bank': config_io.export_bank}
+        try:
+            payload = builders[kind]()
+        except Exception as e:
+            QMessageBox.critical(self, '导出失败', f'读取数据失败：{e}')
+            return
+        try:
+            with open(path, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            QMessageBox.critical(self, '导出失败', f'写入文件失败：{e}')
+            return
+        n_bank = len(payload.get('bank', {}))
+        desc = {'config': '内容：仅配置（account_info.json）',
+                'bank': f'内容：仅题库（{n_bank} 条缓存）',
+                'all': f'内容：配置 + 题库（{n_bank} 条缓存）'}[kind]
+        if kind != 'bank':
+            desc += '\n⚠️ 配置含 API Key 与学习通账号信息，请妥善保管备份文件'
+        QMessageBox.information(self, '导出完成', f'导出成功：{path}\n{desc}')
+
+    def _import_data(self):
+        from task.tool import config_io
+        path, _ = QFileDialog.getOpenFileName(self, '导入备份', '',
+                                              '备份文件 (*.json);;所有文件 (*)')
+        if not path:
+            return
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                payload = json.load(f)
+        except Exception as e:
+            QMessageBox.critical(self, '导入失败', f'读取文件失败：{e}')
+            return
+        try:
+            report = config_io.import_data(payload)
+        except Exception as e:
+            QMessageBox.critical(self, '导入失败', str(e))
+            return
+        if payload.get('kind') in ('config', 'all') and payload.get('config'):
+            try:
+                self.load_data()   # 刷新界面（含主题/各下拉框）
+            except Exception:
+                pass
+        QMessageBox.information(self, '导入完成',
+                                report + '\n\n如刷课任务正在运行，重启任务后生效')
+
 
     # ------------------------------------------------------------------ 窗口初始化
     def _load_version(self):
