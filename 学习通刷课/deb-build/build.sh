@@ -7,7 +7,7 @@ set -e
 cd "$(dirname "$0")"
 ROOT="$(cd .. && pwd)"           # 学习通刷课/
 export DEB_SRC="$ROOT/shuake_src"
-VER="26.09.15-1"
+VER="26.09.16-1"
 PKG="xuexitong-shuake_${VER}_amd64"
 WORK="pkg/$PKG"
 
@@ -114,7 +114,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.environ['DEB_SRC'], '.pylibs'))
 from PIL import Image
 img = Image.open(os.path.join(os.environ['DEB_SRC'], 'task/img/xuexitong1 .ico'))
-img.save('pkg/xuexitong-shuake_26.09.15-1_amd64/usr/share/icons/hicolor/256x256/apps/xuexitong-shuake.png')
+img.save('pkg/xuexitong-shuake_26.09.16-1_amd64/usr/share/icons/hicolor/256x256/apps/xuexitong-shuake.png')
 print('icon ok', img.size)
 PYEOF
 cat > "$WORK/usr/share/applications/xuexitong-shuake.desktop" <<'DESK'
@@ -132,7 +132,7 @@ DESK
 # 4) 控制文件与文档
 cat > "$WORK/DEBIAN/control" <<'CTRL'
 Package: xuexitong-shuake
-Version: 26.09.15-1
+Version: 26.09.16-1
 Section: net
 Priority: optional
 Architecture: amd64
