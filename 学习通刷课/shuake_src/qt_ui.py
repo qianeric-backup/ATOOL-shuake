@@ -678,6 +678,18 @@ class StartWindow(QMainWindow):
         gl.addWidget(self._input_widget(self.homework_entry), self._detail_row_next - 1, 1,
                      Qt.AlignmentFlag.AlignLeft)
 
+        self.task_kind_label = QLabel('任务类型:')
+        self.task_kind_entry = QComboBox()
+        self.task_kind_entry.addItems(['作业', '考试'])
+        self.task_kind_entry.setToolTip(
+            '作业模式下的任务类型：\n'
+            '作业 —— 遍历/手动打开课程作业并自动作答（原功能）\n'
+            '考试 —— 遍历课程考试列表并自动作答（只暂存不自动交卷，交卷需人工确认）\n'
+            '考试页结构未对全部院校版本验证，首次使用请人工盯守')
+        gl.addWidget(self.task_kind_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
+        gl.addWidget(self._input_widget(self.task_kind_entry), self._detail_row_next - 1, 1,
+                     Qt.AlignmentFlag.AlignLeft)
+
         # 默认选中第一个分组（配置设置）
         first_child = self.set_tree.topLevelItem(0).child(0)
         self.set_tree.setCurrentItem(first_child)
@@ -1635,6 +1647,8 @@ class StartWindow(QMainWindow):
                 self.lock_screen_check.show()
                 self.homework_label.hide()
                 self.homework_entry.hide()
+                self.task_kind_label.hide()
+                self.task_kind_entry.hide()
             else:  # mode == 2 作业
                 self.question_label.setText('作业答题:')
                 # 恢复作业模式上次选择的答题方式（通常为 AI 智能答题）
@@ -1658,6 +1672,8 @@ class StartWindow(QMainWindow):
                 self.lock_screen_check.hide()
                 self.homework_label.show()
                 self.homework_entry.show()
+                self.task_kind_label.show()
+                self.task_kind_entry.show()
 
             # API 组：任一选择 AI 智能答题时显示
             use_ai = (self.question_entry.currentText() == AI_OPTION
@@ -1792,7 +1808,8 @@ class StartWindow(QMainWindow):
         data['API_MODEL'] = self.API_MODEL_entry.currentText().strip()
         data['speed'] = self.speed_entry.currentText()
         data['homework'] = self.homework_entry.currentText()
-        data['task_type'] = '章节' if self._current_mode == 1 else '作业'
+        data['task_type'] = ('章节' if self._current_mode == 1
+                             else self.task_kind_entry.currentText())
         data['radio_var'] = self._current_mode
         data['font_type'] = self.font_entry.currentText()
         data['font_size'] = self.size_entry.currentText()

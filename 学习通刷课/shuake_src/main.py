@@ -30,6 +30,7 @@ from task.watch_vido import study_page
 from task.quiz_ai import  finish_quiz
 from task.tool.send_wx import send_error
 from task.do_work import do_work
+from task.exam_ai import do_exam
 from task.reading import reading
 condition=True#用于判断是否调节倍数
 error_num=0#错误次数
@@ -237,7 +238,7 @@ def choice_course(driver, course_name,speed,task_type,phone_number):
             if  course_name in course_element.get_attribute('title') or course_name in course_element.text:
                 # 滚动到课程名称元素的位置
                 driver.execute_script("arguments[0].scrollIntoView();", course_element)
-                if task_type!='作业':
+                if task_type not in ('作业', '考试'):
                     set_speed(speed, driver)
                 # 使用 JavaScript 点击课程名称元素
                 driver.execute_script("arguments[0].click();", course_element)
@@ -295,7 +296,7 @@ def find_mission(driver,task_type,speed):
         print(color.red('未检测到课程内容 iframe（页面可能未加载完成），跳过本页'), flush=True)
         return False
     driver.switch_to.frame(iframe_el)
-    if task_type == '作业':
+    if task_type in ('作业', '考试'):
         return True
     try:
         # 查找待完成任务点的元素
@@ -825,6 +826,9 @@ def main(browser, driver_path, phone_number, password, choice, course_lst,API,af
         if find_mission(driver,task_type,speed):
             if task_type=='作业':
                 do_work(driver,course_name,homework,API,api_url=API_URL,api_model=API_MODEL)
+                return
+            if task_type=='考试':
+                do_exam(driver,course_name,API,mode=homework,api_url=API_URL,api_model=API_MODEL)
                 return
             turn_page(driver, '学生学习页面')
             fold(driver)
