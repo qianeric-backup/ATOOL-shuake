@@ -341,25 +341,13 @@ def fold(driver):
         pass
 
 def set_speed(speed,driver):
+    """播放倍速由视频页 playbackRate 直设统一生效（watch_vido.set_video_rate，
+    进页设置 + 轮询每秒校正）。此处仅打印日志并锁定只提示一次。"""
     global condition
     if not condition:
         return
-    print(color.blue(f'调节倍数为：{speed}X（有头模式按键尝试；'
-                     f'无头模式下由视频页 playbackRate 直设生效）'), flush=True)
-    try:
-        speed=int(speed)-1
-        from task.tool import runtime_flags
-        for i in range(int(speed)*10):
-            if not runtime_flags.HEADLESS:
-                pyautogui.press('d')   # 无头模式下跳过（依赖真实屏幕焦点）
-            action=ActionChains(driver)
-            action.send_keys('d').perform()   # WebDriver 通道，无头下同样有效
-            time.sleep(0.1)
-        print(color.green('调节成功'), flush=True)
-        condition=False
-    except Exception as e:
-        print(color.yellow(f'调节失败{e}'), flush=True)
-        condition=True
+    print(color.blue(f'播放倍速将设为：{speed}x（playbackRate 直设，所有模式生效）'), flush=True)
+    condition=False
 
 def page_message(driver):
     """检测页面内容类型，返回包含视频、PPT、测验、直播、讨论、音频、阅读的字典"""

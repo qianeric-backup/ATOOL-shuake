@@ -197,13 +197,7 @@ def check_vido_play(driver, last_time, current_time):
                     new_speed=1
                     print(color.red(f'当前视频已被设置不能调节高倍数，现在将倍数调至1倍'), flush=True)
                     account_info['speed'] = '1'
-                for j in range(int(int(speed) - new_speed) * 10):
-                    if not runtime_flags.HEADLESS:
-                        pyautogui.press('a')   # 无头模式下跳过（依赖真实屏幕焦点）
-                    action = ActionChains(driver)
-                    action.send_keys('a').perform()   # WebDriver 通道，无头下同样有效
-                    time.sleep(0.1)
-                print(color.green('调节成功'), flush=True)
+                # 降速写回 account_info 后，轮询每秒的 set_video_rate 校正自动生效
                 try:
                     driver.find_element(By.CSS_SELECTOR,
                                         '[class="vjs-play-control vjs-control vjs-button vjs-paused"]').click()
