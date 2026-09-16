@@ -102,7 +102,7 @@ class Answer:
             self.get_title_option()
             print(color.red('正在搜索中，请耐心等待...'))
             self.use_ai_wen_da()
-            self.use_deepseek()
+            self.use_ai_fallback()
             print(color.green('开始答题'), flush=True)
             for title_num in self.num_answer_dit.keys():
                 if self.finish_title(title_num):
@@ -194,7 +194,7 @@ class Answer:
             else:
                 self.num_answer_dit[i] = self.answer_list
 
-    def use_deepseek(self):
+    def use_ai_fallback(self):
         for i, answer in self.num_answer_dit.items():
             if not answer:
                 self.no_answer_dit[i] = self.all_title_dit[i]

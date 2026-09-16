@@ -422,7 +422,7 @@ class Start:
         # 后续控件动态添加，保持原有变量名
         self.question_label = ctk.CTkLabel(self.detail_set_frame, text="章节测验:", font=self.font)
         self.question_entry = ctk.CTkComboBox(
-            self.detail_set_frame, values=["DeepSeek AI", '随机答题', "不刷题"],dropdown_fg_color=self.frame_fg_color,
+            self.detail_set_frame, values=["AI 智能答题", '随机答题', "不刷题"],dropdown_fg_color=self.frame_fg_color,
                                            dropdown_hover_color=self.button_color,
             font=self.font, corner_radius=6, state='readonly',
             button_color=self.button_color, command=self.shua_ti_choice
@@ -437,14 +437,14 @@ class Start:
                                                            )
         self.vido_question_label = ctk.CTkLabel(self.detail_set_frame, text="视频题目:", font=self.font)
         self.vido_question_entry = ctk.CTkComboBox(
-            self.detail_set_frame, values=["DeepSeek AI", '随机答题'],dropdown_fg_color=self.frame_fg_color,
+            self.detail_set_frame, values=["AI 智能答题", '随机答题'],dropdown_fg_color=self.frame_fg_color,
                                            dropdown_hover_color=self.button_color,
             font=self.font, corner_radius=6, state='readonly',
             button_color=self.button_color, command=lambda _: self.shua_ti_choice('视频题目')
         )
         self.discussion_label = ctk.CTkLabel(self.detail_set_frame, text="讨论:", font=self.font)
         self.discussion_entry = ctk.CTkComboBox(
-            self.detail_set_frame, values=["DeepSeek AI", '跳过讨论'],dropdown_fg_color=self.frame_fg_color,
+            self.detail_set_frame, values=["AI 智能答题", '跳过讨论'],dropdown_fg_color=self.frame_fg_color,
                                            dropdown_hover_color=self.button_color,
             font=self.font, corner_radius=6, state='readonly',
             button_color=self.button_color, command=lambda _: self.shua_ti_choice('讨论')
@@ -646,7 +646,7 @@ class Start:
             self.question_label.configure(text='章节测验')
             self.question_label.grid(row=4, column=1, padx=5, pady=self.pady, sticky=tk.W)
             self.question_entry.grid(row=4, column=2, padx=5, pady=self.pady, sticky=tk.W)
-            if self.question_entry.get()=='DeepSeek AI':
+            if self.question_entry.get()=='AI 智能答题':
                 self.after_finish_question.grid(row=5, column=1, padx=5, pady=self.pady, sticky=tk.W)
                 self.after_finish_question_entry.grid(row=5, column=2, padx=5, pady=self.pady, sticky=tk.W)
             self.after_finish_question_entry.configure(values=["仅自动保存", '强制自动提交',
@@ -655,8 +655,8 @@ class Start:
             self.vido_question_entry.grid(row=6, column=2, padx=5, pady=self.pady, sticky=tk.W)
             self.discussion_label.grid(row=7, column=1, padx=5, pady=self.pady, sticky=tk.W)
             self.discussion_entry.grid(row=7, column=2, padx=5, pady=self.pady, sticky=tk.W)
-            self.question_entry.configure(values=['DeepSeek AI','随机答题','不刷题'])
-            if self.question_entry.get()=='DeepSeek AI' or self.vido_question_entry.get()=='DeepSeek AI' or self.discussion_entry.get()=='DeepSeek AI':
+            self.question_entry.configure(values=['AI 智能答题','随机答题','不刷题'])
+            if self.question_entry.get()=='AI 智能答题' or self.vido_question_entry.get()=='AI 智能答题' or self.discussion_entry.get()=='AI 智能答题':
                 self.API_label.grid(row=8, column=1, padx=5, pady=self.pady, sticky=tk.W)
                 self.API_entry.grid(row=8, column=2, padx=5, pady=self.pady, sticky=tk.W)
                 self.show_api_button.grid(row=8, column=3, pady=self.pady, sticky=tk.W)
@@ -682,8 +682,8 @@ class Start:
             self.question_label.configure(text='作业答题')
             self.question_label.grid(row=4, column=1, padx=5, pady=self.pady, sticky=tk.W)
             self.question_entry.grid(row=4, column=2, padx=5, pady=self.pady, sticky=tk.W)
-            self.question_entry.set('DeepSeek AI')
-            self.question_entry.configure(values=['DeepSeek AI'])
+            self.question_entry.set('AI 智能答题')
+            self.question_entry.configure(values=['AI 智能答题'])
             self.after_finish_question.grid(row=5, column=1, padx=5, pady=self.pady, sticky=tk.W)
             self.after_finish_question_entry.grid(row=5, column=2, padx=5, pady=self.pady, sticky=tk.W)
             self.after_finish_question_entry.set('仅自动保存')
@@ -714,16 +714,16 @@ class Start:
         if self.question_entry.get() == '随机答题' and event != '视频题目' and event!='讨论':
             tk.messagebox.showinfo('提示',
                                    '请谨慎选择，只有在章节测验不计入总成绩的情况下才能使用，否则因此挂科了请自行承担后果！！！')
-        if self.question_entry.get()!='DeepSeek AI':
+        if self.question_entry.get()!='AI 智能答题':
             self.after_finish_question.grid_forget()
             self.after_finish_question_entry.grid_forget()
         else:
             self.after_finish_question.grid(row=5, column=1, padx=5, pady=self.pady, sticky=tk.W)
             self.after_finish_question_entry.grid(row=5, column=2, padx=5, pady=self.pady, sticky=tk.W)
-        if self.vido_question_entry.get()=='DeepSeek AI' or self.question_entry.get()=='DeepSeek AI' or self.discussion_entry.get()=='DeepSeek AI':
-            if self.vido_question_entry.get()=='DeepSeek AI' and event=='视频题目':
+        if self.vido_question_entry.get()=='AI 智能答题' or self.question_entry.get()=='AI 智能答题' or self.discussion_entry.get()=='AI 智能答题':
+            if self.vido_question_entry.get()=='AI 智能答题' and event=='视频题目':
                 tk.messagebox.showinfo('提示','这个是用于完成视频中弹出的题目，'
-                                              '只有在选错答案会回退视频的情况下才建议使用DeepSeek AI，一般情况请使用随机答题,没有任何影响')
+                                              '只有在选错答案会回退视频的情况下才建议使用AI智能答题，一般情况请使用随机答题,没有任何影响')
             self.API_label.grid(row=8, column=1, padx=5, pady=5, sticky=tk.W)
             self.API_entry.grid(row=8, column=2, padx=5, pady=5, sticky=tk.W)
             self.show_api_button.grid(row=8, column=3,  pady=5, sticky=tk.W)
@@ -732,7 +732,7 @@ class Start:
             self.API_MODEL_label.grid(row=10, column=1, padx=5, pady=5, sticky=tk.W)
             self.API_MODEL_entry.grid(row=10, column=2, padx=5, pady=5, sticky=tk.W)
         else:
-            if self.vido_question_entry.get()!='DeepSeek AI' and self.question_entry.get()!='DeepSeek AI' and self.discussion_entry.get()!='DeepSeek AI':
+            if self.vido_question_entry.get()!='AI 智能答题' and self.question_entry.get()!='AI 智能答题' and self.discussion_entry.get()!='AI 智能答题':
                 self.API_label.grid_forget()
                 self.API_entry.grid_forget()
                 self.show_api_button.grid_forget()
@@ -1116,7 +1116,7 @@ class Start:
             return False
         else:
             self.account_info['choice'] = self.question_entry.get()
-        if self.after_finish_question_entry.get()== '' and self.question_entry.get()=='DeepSeek AI':
+        if self.after_finish_question_entry.get()== '' and self.question_entry.get()=='AI 智能答题':
             tk.messagebox.showerror('警告', message='请完成答完题后的设置')
             return False
         else:
@@ -1131,7 +1131,7 @@ class Start:
             return False
         else:
             self.account_info['discussion_choice'] = self.discussion_entry.get()
-        if self.question_entry.get() == 'DeepSeek AI' or self.vido_question_entry.get() == 'DeepSeek AI' or self.discussion_entry.get() == 'DeepSeek AI':
+        if self.question_entry.get() == 'AI 智能答题' or self.vido_question_entry.get() == 'AI 智能答题' or self.discussion_entry.get() == 'AI 智能答题':
             if self.API_entry.get()=='':
                 tk.messagebox.showerror('警告', message='请填写API密钥')
                 return False
@@ -1159,7 +1159,7 @@ class Start:
         self.account_info['lock_screen'] = self.lock_screen_check.get()
         self.account_info['radio_var']=self.radio_var.get()
 
-        result = tk.messagebox.askokcancel('确认保存', '你确定要保存吗？\n(使用DeepSeek可支持全题型作答)')
+        result = tk.messagebox.askokcancel('确认保存', '你确定要保存吗？\n(使用AI可支持全题型作答)')
         if result:
             with open(r'task/tool/account_info.json', 'w', encoding='utf-8') as f:
                 json.dump(self.account_info, f)

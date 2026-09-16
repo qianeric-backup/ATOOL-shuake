@@ -21,7 +21,7 @@ class Discussion(Common):
         self.API=API
         self.discussion_choice=discussion_choice
     def get_answer(self):
-        if self.discussion_choice == 'DeepSeek AI':
+        if self.discussion_choice in ('AI 智能答题', 'DeepSeek AI'):
             replay_list = self.driver.find_elements(By.CLASS_NAME, 'topicDetail_replyItem')
             if len(replay_list) > 0:
                 print(f'已检索到{len(replay_list)}条回复', flush=True)

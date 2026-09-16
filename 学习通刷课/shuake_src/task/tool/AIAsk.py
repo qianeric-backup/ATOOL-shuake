@@ -113,7 +113,7 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
     :param API_KEY: API 密钥
     :param title: 题目内容
     :param _type: 题目类型
-    :param api_url: API 地址（留空则使用配置文件 API_URL 或默认 deepseek 地址）
+    :param api_url: API 地址（留空则使用配置文件 API_URL 或默认接口地址）
     :param api_model: 模型名称（留空则自动从接口获取）
     """
     if not API_KEY:

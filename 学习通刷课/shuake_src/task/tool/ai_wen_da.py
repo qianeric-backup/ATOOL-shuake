@@ -621,8 +621,8 @@ class AutoAnswer:
     def __init__(self):
         self.api = AnswerAPI()
         self.matcher = AnswerMatcher()
-    def use_deepseek(self, question: Question,api) :
-        """使用DeepSeek API获取答案"""
+    def use_ai_fallback(self, question: Question, api):
+        """使用 AI API 获取答案"""
         start_time = time.time()
         typ_dict = {'0': '单选题', '1': '多选题', '2': '填空题', '3': '判断题', '9': '简答题'}
         title = "【" + typ_dict[question.type] + "】" + question.question + str(question.options)
@@ -635,7 +635,7 @@ class AutoAnswer:
 
         duration = int((time.time() - start_time) * 1000)
         return [AnswerResult(
-            form="Deepseek",
+            form="AI",
             answer=answer,
             duration=duration
         )]
@@ -668,7 +668,7 @@ class AutoAnswer:
                     match_result = self.matcher.api_answer_match(api_results, question)
                 if not match_result.get('haveAnswer'):
                     print('正在使用AI搜索中...',flush=True)
-                    api_results =self.use_deepseek(question,question.API)
+                    api_results = self.use_ai_fallback(question, question.API)
             else:
                 print('未配置API Key',flush=True)
                 return {'res': '', 'haveAnswer': False}

@@ -100,7 +100,7 @@ def check_video_question(driver,API,video_title_choice,api_url='',api_model=''):
         options = options.find_elements(By.TAG_NAME, 'li')
         options_txt=[option.text for option in options]
         submit = element.find_element(By.ID, 'videoquiz-submit')
-        if video_title_choice=='DeepSeek AI':
+        if video_title_choice in ('AI 智能答题', 'DeepSeek AI'):
             answer = get_answer(API,question_title+'\n'+str(options_txt),question_type,api_url=api_url,api_model=api_model)
             if type(answer) is str:
                 try:

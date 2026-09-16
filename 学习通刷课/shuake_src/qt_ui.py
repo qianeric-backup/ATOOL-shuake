@@ -1026,7 +1026,7 @@ class StartWindow(QMainWindow):
             if current in ids:
                 self.API_MODEL_entry.setCurrentText(current)
             else:
-                # 自动选默认：deepseek-chat 等常用对话模型优先，免新手无从下手
+                # 自动选默认：常用对话类模型优先，免新手无从下手
                 pick = next((m for pref in ('deepseek-chat', 'deepseek-reasoner')
                              if pref in ids), None)
                 pick = pick or next(
@@ -1055,7 +1055,7 @@ class StartWindow(QMainWindow):
                          args=(url, key, model), daemon=True).start()
 
     def _test_api_worker(self, url, key, model):
-        """OpenAI 兼容 /chat/completions 连通性测试（DeepSeek/百炼/Ollama/vLLM 等通用）"""
+        """OpenAI 兼容 /chat/completions 连通性测试（任意服务商/中转站/本地推理通用）"""
         import requests
         import time as _time
         base = url.rstrip('/')

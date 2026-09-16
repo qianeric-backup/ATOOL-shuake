@@ -187,7 +187,7 @@ class do_work(Answer):
             self.num_option_dit[i] = self.option_text_list
         print(color.red('正在搜索中，请耐心等待...'))
         self.use_ai_wen_da()
-        self.use_deepseek()
+        self.use_ai_fallback()
         print(color.green('开始答题'), flush=True)
         for title_num in self.num_answer_dit.keys():
             self.finish_title(title_num)
