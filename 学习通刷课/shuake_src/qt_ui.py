@@ -1648,7 +1648,7 @@ class StartWindow(QMainWindow):
                 if keep == AI_OPTION:
                     self.question_entry.setCurrentText(keep)
                 self.after_finish_question_entry.clear()
-                self.after_finish_question_entry.addItems(['仅自动保存'])
+                self.after_finish_question_entry.addItems(AFTER_FINISH_OPTIONS)
 
                 self.vido_question_label.hide()
                 self.vido_question_entry.hide()

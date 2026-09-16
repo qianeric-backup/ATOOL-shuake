@@ -14,8 +14,9 @@ def turn_page(driver,page_name):
             break
 
 class do_work(Answer):
-    def __init__(self,driver,course_name,homework,API_KEY,api_url='',api_model=''):
-        Answer.__init__(self,driver,test_frame=None,course_name=course_name,api=API_KEY,work_choice=None,after_finish_question='仅自动保存',
+    def __init__(self,driver,course_name,homework,API_KEY,after_finish_question='仅自动保存',
+                 api_url='',api_model=''):
+        Answer.__init__(self,driver,test_frame=None,course_name=course_name,api=API_KEY,work_choice=None,after_finish_question=after_finish_question,
                     api_url=api_url, api_model=api_model)
 
         self.homework = homework
@@ -194,12 +195,42 @@ class do_work(Answer):
             time.sleep(0.5)
         try:
             self.save_elements = self.driver.find_element(By.ID, 'submitFocus').find_elements(By.TAG_NAME, 'a')
-            print(color.red('暂时保存，AI答题不一定完全正确，请自行确认后再提交'), flush=True)
         except Exception:
             # 保存按钮找不到时直接返回，绝不能走到下面引用未定义的 save_elements
             print(color.red('保存失败，请手动保存，15秒后继续'), flush=True)
             time.sleep(15)
             return
+        if self.after_finish_question == '强制自动提交':
+            # 高级设置「答完题后」配置为直接提交：点提交 + 确认弹窗
+            print(color.red('已配置为直接提交，3秒后提交，AI 答题不一定完全正确'), flush=True)
+            time.sleep(3)
+            try:
+                self.driver.find_element(By.CSS_SELECTOR, '[class="btnSubmit workBtnIndex"]').click()
+                time.sleep(1)
+            except Exception:
+                print(color.red('当前页面无提交按钮，回退为仅暂时保存'), flush=True)
+                self._save_only()
+                return
+            try:
+                self.driver.switch_to.default_content()
+                self.driver.find_element(By.XPATH, '//*[@id="popok"]').click()
+                time.sleep(2)
+                message = self.driver.find_element(By.ID, 'popcontent').text
+                if message:
+                    print(color.red(f'提交失败，原因：{message}'), flush=True)
+                    self.driver.find_element(By.ID, 'popok').click()
+                else:
+                    print(color.green('作业已直接提交'), flush=True)
+            except Exception:
+                print(color.red('提交确认弹窗处理异常，请人工确认提交状态'), flush=True)
+            return
+        if self.after_finish_question != '仅自动保存':
+            # 「搜到XX%自动提交」等选项在作业链路不生效（无答题率统计），回退保存
+            print(color.yellow(f'作业链路不支持「{self.after_finish_question}」，按仅保存处理'), flush=True)
+        print(color.red('暂时保存，AI答题不一定完全正确，请自行确认后再提交'), flush=True)
+        self._save_only()
+
+    def _save_only(self):
         for save_element in self.save_elements:
             if save_element.text == '暂时保存':
                 save_element.click()

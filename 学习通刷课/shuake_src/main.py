@@ -814,7 +814,7 @@ def main(browser, driver_path, phone_number, password, choice, course_lst,API,af
             check_face(driver,face_url,face_class='maskDiv',course_name=course_name)
         if find_mission(driver,task_type,speed):
             if task_type=='作业':
-                do_work(driver,course_name,homework,API,api_url=API_URL,api_model=API_MODEL)
+                do_work(driver,course_name,homework,API,after_finish_question=after_finish_question,api_url=API_URL,api_model=API_MODEL)
                 return
             if task_type=='考试':
                 do_exam(driver,course_name,API,mode=homework,api_url=API_URL,api_model=API_MODEL)
