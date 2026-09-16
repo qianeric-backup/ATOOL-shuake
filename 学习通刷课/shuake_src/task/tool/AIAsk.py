@@ -226,16 +226,23 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
             retryable = ('Connection' in msg or 'connection' in msg
                          or 'Timeout' in msg or 'timeout' in msg
                          or 'APIConnectionError' in type(e).__name__)
+            # 429/限流：账户级限制，换通道无效但等一会就能恢复
+            rate_limited = ('429' in msg or 'RATE_LIMIT' in msg.upper()
+                            or 'Too Many Requests' in msg)
             is_last = (idx == len(attempts) - 1)
             # 401/400/404 等服务端明确应答：换通道也无意义，直接结束
             # （但最后一跳 curl 前的"清代理直连"除外——curl 走不同
             #   网络路径，值得再试一次）
-            if not retryable and label != '清代理直连':
+            if not retryable and not rate_limited and label != '清代理直连':
                 break
             print(color.red(f'AI 请求失败（{label}）：{e}'), flush=True)
             if is_last:
                 break
-            if retryable:
+            if rate_limited:
+                wait = min(20 * (idx + 1), 60)   # 20/40/60s 递增，等限流窗口过去
+                print(color.yellow(f'触发限流（429），{wait} 秒后自动重试…'), flush=True)
+                time.sleep(wait)
+            elif retryable:
                 time.sleep(2)
         finally:
             for k, v in saved.items():

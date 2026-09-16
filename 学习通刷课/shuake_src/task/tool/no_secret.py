@@ -14,6 +14,11 @@ from selenium.common.exceptions import StaleElementReferenceException
 from fontTools.ttLib import TTFont
 
 from task.tool import file
+from task.tool import color
+
+
+def color_red(s):
+    return color.red(s)
 
 
 class DecodeSecret:
@@ -30,6 +35,8 @@ class DecodeSecret:
             os.path.abspath(__file__)))), 'task', 'tool', 'font_dict.txt')
         self._secret_dict = {}
         self._font_dict = {}
+        self._decode_miss = 0
+        self._decode_total = 0
         self._setFontDict()
 
     # 获取页面 font_face 的值
@@ -46,24 +53,23 @@ class DecodeSecret:
                     By.CSS_SELECTOR, "head [type='text/css']")
                 for i in fontFaceItem:
                     strData = i.get_attribute('innerHTML')
-                    if strData == "":
+                    if not strData:
                         continue
-                    else:
-                        try:
-                            fontFaceStr = re.findall(";base64,(.*)'[)] format", strData)[0]
-                            break
-                        except Exception as e:
-                            print("当前 fontFace 无法解析：" + str(e), flush=True)
-                            print('当前题目中含有字母或数学特殊符号，无法识别，请选择其他科目进行答题', flush=True)
-                            continue
+                    # 宽松匹配：只抓 base64 主体（历史写法要求紧跟 ') format
+                    # 后缀，页面 CSS 稍变（woff2/换行/去 format）就解析失败，
+                    # 导致整份题目不解密、乱码直达 AI
+                    m = re.search(r"base64,([A-Za-z0-9+/=]{512,})", strData)
+                    if m:
+                        fontFaceStr = m.group(1)
+                        break
                 break
             except StaleElementReferenceException:
                 # 页面正在刷新/切换，稍等后整体重查
                 time.sleep(1)
         if self._statusCode == 1:
             if fontFaceStr == "":
-                # raise Exception("当前任务点无法获取 font_face 值")
-                print('英语题', flush=True)
+                print(color_red('未检出题目加密字体（不一定是异常；'
+                                '若题目出现乱码请把日志反馈给开发者）'), flush=True)
                 return
         elif self._statusCode == 2:
             if fontFaceStr == "":
@@ -137,10 +143,20 @@ class DecodeSecret:
             if wordMD5 is None:
                 trueStr += word
                 continue
+            self._decode_total += 1
             trueWordCode = self._font_dict.get(wordMD5, None)
+            if trueWordCode is None:
+                # 页面字形不在映射库中（学习通更新字体）——保留原字并计数
+                self._decode_miss += 1
+                trueStr += word
+                continue
             trueWor = unicodedata.normalize('NFKC', chr(trueWordCode))
             trueStr += trueWor
         return trueStr
+
+    def decode_stats(self):
+        """返回 (未命中数, 解密尝试总数)——映射库过期时用于日志诊断"""
+        return self._decode_miss, self._decode_total
 
 
 if __name__ == '__main__':

@@ -125,6 +125,9 @@ class Answer:
         self.decodeSecret = DecodeSecret(1)
         print(color.yellow("启用字体解密"), flush=True)
         self.decodeSecret.getFontFace(self.driver)
+        if not getattr(self.decodeSecret, '_secret_dict', {1: 1}):
+            print(color.red('本页未提取到加密字库：被混淆的题目字符将保持乱码，'
+                            'AI 将按上下文尽力作答'), flush=True)
         # 获取页面中的所有题目
         self.questionList0 = self.driver.find_elements(By.CSS_SELECTOR, '[class="singleQuesId"]')
         print(color.yellow("当前测试共有{}题".format(len(self.questionList0))), flush=True)
