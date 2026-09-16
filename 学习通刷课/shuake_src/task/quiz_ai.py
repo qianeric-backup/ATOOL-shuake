@@ -108,7 +108,8 @@ class Answer:
                 if self.finish_title(title_num):
                     self.reword_time += 1
                 time.sleep(1)
-            self.ans_rate = self.reword_time / len(self.questionList0)
+            self.ans_rate = (self.reword_time / len(self.questionList0)
+                             if self.questionList0 else 0.0)
             print(self.reword_time, '/', len(self.questionList0))
             message = self.submit()
             if not message and self.times<3:

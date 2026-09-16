@@ -1,4 +1,5 @@
 import base64
+import glob
 import hashlib
 import re
 import os
@@ -92,6 +93,26 @@ class DecodeSecret:
 
         # 将 fontFace 解析为 temp.ttf 文件，再把temp.ttf 文件解析为 temp.xml 文件
         b = base64.b64decode(fontFace)
+        # 字体样本留档：映射库缺新字形时（decode 未命中），可用这些样本
+        # 离线解析字形 → 扩充 font_dict.txt。最多保留 20 份，超出删最旧。
+        try:
+            sample_dir = os.path.join(os.path.dirname(os.path.dirname(
+                os.path.dirname(os.path.abspath(__file__)))),
+                'task', 'record', 'font_samples')
+            os.makedirs(sample_dir, exist_ok=True)
+            samples = sorted(
+                glob.glob(os.path.join(sample_dir, 'font_*.ttf')),
+                key=os.path.getmtime)
+            for old in samples[:-19]:
+                try:
+                    os.remove(old)
+                except Exception:
+                    pass
+            with open(os.path.join(
+                    sample_dir, f'font_{int(time.time())}.ttf'), 'wb') as sf:
+                sf.write(b)
+        except Exception:
+            pass  # 样本留档失败不影响解密主流程
         with open(ttf_temp_path, "wb") as f:
             f.write(b)
         font = TTFont(ttf_temp_path)
