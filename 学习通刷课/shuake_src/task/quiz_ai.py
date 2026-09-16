@@ -364,38 +364,59 @@ class Answer:
             print(color.red(f'答题时出错了{e}'), flush=True)
             return False
 
+    _SAVE_BTN_CSS = ('[class*="btnSave"]', '[class*="btnSave"][class*="work"]',
+                     '//a[contains(text(),"暂存")]',
+                     '//a[contains(text(),"保存")]')
+    _SUBMIT_BTN_CSS = ('[class*="btnSubmit"]', '[class*="btnSubmit"][class*="work"]',
+                       '//a[contains(text(),"提交")]')
+
+    def _click_btn(self, css_list, desc):
+        """多候选宽松匹配点击（页面按钮 class 顺序/附加类不固定，
+        严格 [class="a b"] 匹配会 NoSuchElementException 崩掉整卷）"""
+        for css in css_list:
+            by = By.XPATH if css.startswith('//') else By.CSS_SELECTOR
+            try:
+                self.driver.find_element(by, css).click()
+                return True
+            except Exception:
+                continue
+        print(color.red(f'未找到{desc}按钮（页面结构可能与预期不符），'
+                        f'请人工保存/提交，本卷继续'), flush=True)
+        return False
+
     def submit(self):
         formatted_result = "{:.2%}".format(self.ans_rate)
         print(color.red(f'本次答题率为{formatted_result}'), flush=True)
         if self.after_finish_question=='仅自动保存':
             print(color.yellow('3秒后保存'), flush=True)
             time.sleep(3)
-            self.driver.find_element(By.CSS_SELECTOR, '[class="btnSave workBtnIndex"]').click()
+            self._click_btn(self._SAVE_BTN_CSS, '暂存保存')
         elif self.after_finish_question=='强制自动提交'  or self.work_choice =='随机答题' or self.ans_rate >= self.after_finish_question:
             # 点击提交
             print(color.yellow('3秒后提交'), flush=True)
             time.sleep(3)
-            try:
-                self.driver.find_element(By.CSS_SELECTOR, '[class="btnSubmit workBtnIndex"]').click()
-                time.sleep(1)
-            except NoSuchElementException:
-                print(color.red('当前测验无法提交'), flush=True)
+            if not self._click_btn(self._SUBMIT_BTN_CSS, '提交'):
                 return True
-            # 点击确认
-            self.driver.switch_to.default_content()
-            self.driver.find_element(By.XPATH, '//*[@id="popok"]').click()
-            time.sleep(2)
-            message =self.driver.find_element(By.ID, 'popcontent').text
-            if message:
-                print(color.red(f'提交失败，原因：{message}'), flush=True)
-                self.driver.find_element(By.ID, 'popok').click()
-                return False
-            self.save_score()
+            time.sleep(1)
+            try:
+                # 点击确认
+                self.driver.switch_to.default_content()
+                self.driver.find_element(By.XPATH, '//*[@id="popok"]').click()
+                time.sleep(2)
+                message =self.driver.find_element(By.ID, 'popcontent').text
+                if message:
+                    print(color.red(f'提交失败，原因：{message}'), flush=True)
+                    self.driver.find_element(By.ID, 'popok').click()
+                    return False
+                self.save_score()
+            except Exception:
+                print(color.red('提交确认弹窗处理异常，请人工确认提交状态'), flush=True)
+                return True
         else:
             print(color.yellow(f'答题率未达到提交要求{self.after_finish_question}'), flush=True)
             print(color.yellow('3秒后保存'), flush=True)
             time.sleep(3)
-            self.driver.find_element(By.CSS_SELECTOR, '[class="btnSave workBtnIndex"]').click()
+            self._click_btn(self._SAVE_BTN_CSS, '暂存保存')
 
         return True
 
