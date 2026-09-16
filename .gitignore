@@ -48,3 +48,6 @@ wine-build/
 !学习通刷课/wine-build/build.sh
 台账.txt
 .filter-backup/
+
+# deb 打包产物
+学习通刷课/deb-build/pkg/
