@@ -514,11 +514,10 @@ class StartWindow(QMainWindow):
         self.radio_button_1.toggled.connect(self.function_choice)
         self.radio_button_2 = QRadioButton('自动完成作业')
         self.radio_button_2.toggled.connect(self.function_choice)
-        self.radio_button_3 = QRadioButton('自动完成考试')
-        self.radio_button_3.toggled.connect(self.function_choice)
         gl.addWidget(self.radio_button_1, 0, 0, Qt.AlignmentFlag.AlignLeft)
         gl.addWidget(self.radio_button_2, 1, 0, Qt.AlignmentFlag.AlignLeft)
-        gl.addWidget(self.radio_button_3, 2, 0, Qt.AlignmentFlag.AlignLeft)
+        # 考试入口已移至「作业模式 > 高级设置 > 任务类型（作业/考试）」，
+        # 此处不再单列「自动完成考试」单选
 
         # ---------- 高级设置 ----------
         gl = self.set_group_pages['高级设置'][2]
@@ -1603,17 +1602,8 @@ class StartWindow(QMainWindow):
             QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
 
     def function_choice(self):
-        """功能单选变化：1 自动刷课答题 / 2 自动完成作业 / 3 考试(未开放)"""
-        mode = 1
-        if self.radio_button_2.isChecked():
-            mode = 2
-        elif self.radio_button_3.isChecked():
-            mode = 3
-        if mode == 3:
-            QMessageBox.information(self, '提示', '该功能还在开发中...,敬请期待')
-            self.radio_button_1.setChecked(True)
-            return
-        self._current_mode = mode
+        """功能单选变化：1 自动刷课答题 / 2 自动完成作业（含任务类型=考试）"""
+        self._current_mode = 2 if self.radio_button_2.isChecked() else 1
         self._reload_advanced()
 
     def _reload_advanced(self):
@@ -1970,11 +1960,20 @@ class StartWindow(QMainWindow):
         self.homework_entry.setCurrentText(data.get('homework', '手动选择'))
 
         mode = int(data.get('radio_var', 1))
+        legacy_exam = False
+        if mode == 3:
+            # 旧版「自动完成考试」单选：并入作业模式 + 任务类型=考试
+            mode = 2
+            legacy_exam = True
         if mode == 2:
             self.radio_button_2.setChecked(True)
         else:
             self.radio_button_1.setChecked(True)
         self._current_mode = mode
+        if legacy_exam:
+            self.task_kind_entry.setCurrentText('考试')
+        elif data.get('task_type') in ('作业', '考试'):
+            self.task_kind_entry.setCurrentText(data['task_type'])
 
         self.pass_face_check.setChecked(bool(data.get('pass_face', 0)))
         self.lock_screen_check.setChecked(bool(data.get('lock_screen', 0)))
