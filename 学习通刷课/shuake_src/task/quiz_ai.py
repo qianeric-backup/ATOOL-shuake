@@ -166,7 +166,8 @@ class Answer:
                 print(color.green('\n<===================  分隔线  ===================>\n'), flush=True)
                 try:
                     self.answer_list = asyncio.run(
-                        main(self.questionType_list[i], self.only_title_text[i], self.num_option_dit[i], self.API_KEY))
+                        main(self.questionType_list[i], self.only_title_text[i], self.num_option_dit[i], self.API_KEY,
+                             api_url=self.API_URL, api_model=self.API_MODEL))
                 except Exception as e:
                     print(color.red(f'第{i+1}题搜索失败：{e}'), flush=True)
 
@@ -175,7 +176,8 @@ class Answer:
                 if not self.answer_list:
                     try:
                         self.answer_list = asyncio.run(
-                            main(self.questionType_list[i], self.only_title_text[i], self.num_option_dit[i], self.API_KEY))
+                            main(self.questionType_list[i], self.only_title_text[i], self.num_option_dit[i], self.API_KEY,
+                                 api_url=self.API_URL, api_model=self.API_MODEL))
                     except Exception as e:
                         print(color.red(f'第{i+1}题搜索失败：{e}'), flush=True)
                     if type(self.answer_list) is str:
