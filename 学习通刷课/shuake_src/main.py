@@ -344,7 +344,8 @@ def set_speed(speed,driver):
     global condition
     if not condition:
         return
-    print(color.blue(f'调节倍数为：{speed}X'), flush=True)
+    print(color.blue(f'调节倍数为：{speed}X（有头模式按键尝试；'
+                     f'无头模式下由视频页 playbackRate 直设生效）'), flush=True)
     try:
         speed=int(speed)-1
         from task.tool import runtime_flags

@@ -148,6 +148,28 @@ def check_video_question(driver,API,video_title_choice,api_url='',api_model=''):
     except:
         return
 
+def set_video_rate(driver, speed):
+    """直接设置 <video> 的 playbackRate（JS 注入，不依赖快捷键/焦点/倍速扩展）。
+
+    旧链路（倍速扩展 d 键 + ActionChains/send_keys）只在按键焦点恰好位于
+    视频 iframe 时生效；无头模式下焦点在章节树层，视频页监听器永远收不到，
+    导致倍速形同虚设。playbackRate 直设对有头/无头同样可靠，
+    由 check_vido_finish 轮询每秒校正（播放器内部可能重置速率）。"""
+    try:
+        rate = float(speed)
+    except Exception:
+        rate = 1.0
+    if rate <= 0:
+        rate = 1.0
+    try:
+        driver.execute_script(
+            'document.querySelectorAll("video").forEach(function(v){'
+            '  try { v.playbackRate = arguments[0]; } catch(e) {} });',
+            rate)
+    except Exception:
+        pass
+
+
 def check_vido_play(driver, last_time, current_time):
     global b, pause_start_time
     with open(r'task/tool/account_info.json', 'r', encoding='utf-8') as f:
@@ -243,6 +265,13 @@ def check_vido_finish(driver,i,time_start,total_time,vido_iframe,lock_screen,API
             # check_face(driver,driver.current_url,'popDiv1 wid640  faceCollectQrPopVideo  popClass faceRecognition_0')
             driver.switch_to.frame('iframe')
             driver.switch_to.frame(vido_iframe)
+            # 每秒校正倍速（防播放器重置；check_vido_play 降速后此处同步跟随）
+            try:
+                with open(r'task/tool/account_info.json', 'r', encoding='utf-8') as f:
+                    _speed = json.load(f).get('speed', '1')
+            except Exception:
+                _speed = '1'
+            set_video_rate(driver, _speed)
             check_internet(driver)
             check_video_question(driver,API,video_title_choice,api_url=api_url,api_model=api_model)
             element = driver.find_element(By.CLASS_NAME, 'vjs-current-time-display')
@@ -305,6 +334,14 @@ def study_page(driver,course_name,lock_screen,API,video_title_choice,api_url='',
                 driver.find_element(By.CLASS_NAME,'vjs-big-play-button').click()
             except:
                 pass
+            # 倍速直设（此时已在视频 iframe 内）
+            try:
+                with open(r'task/tool/account_info.json', 'r', encoding='utf-8') as f:
+                    _speed = json.load(f).get('speed', '1')
+            except Exception:
+                _speed = '1'
+            set_video_rate(driver, _speed)
+            print(color.green(f'已设置播放速率：{_speed}x（playbackRate 直设）'), flush=True)
             #点击我知道了
             driver.switch_to.default_content()
             driver.switch_to.frame('iframe')
