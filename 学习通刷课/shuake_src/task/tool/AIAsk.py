@@ -22,6 +22,9 @@ DEFAULT_MODELS = ["deepseek-chat", "deepseek-reasoner"]
 _model_cache = None
 _model_cache_url = None
 
+# 通道偏好记忆：curl 兜底成功后置为 'curl'（进程级）
+_preferred_channel = None
+
 
 def _load_config():
     """从 account_info.json 读取 API 配置"""
@@ -184,11 +187,16 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
         return data['choices'][0]['message']['content']
 
     # 请求策略：默认环境 → 重试 → 清代理环境变量直连 → 系统 curl。
-    # 覆盖：网络抖动、残留代理变量、Clash TUN 按进程分流、SDK 栈异常
+    # 覆盖：网络抖动、残留代理变量、Clash TUN 按进程分流、SDK 栈异常。
+    # 通道偏好记忆：curl 成功过一次后，同进程内后续请求直接优先走
+    # curl（TUN 分流是持续性的，没必要每题都先烧一遍失败通道）
     _PROXY_KEYS = ('http_proxy', 'https_proxy', 'all_proxy',
                    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
                    'no_proxy', 'NO_PROXY')
     attempts = ('默认环境', '重试', '清代理直连', 'curl 兜底')
+    global _preferred_channel
+    if _preferred_channel == 'curl':
+        attempts = ('curl 兜底', '默认环境', '重试', '清代理直连')
     answer = None
     last_err = None
     for idx, label in enumerate(attempts):
@@ -200,7 +208,8 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
         try:
             if label == 'curl 兜底':
                 answer = _curl_ask()
-                print(color.green('AI 请求成功（curl 兜底通道）'), flush=True)
+                _preferred_channel = 'curl'
+                print(color.green('AI 请求成功（curl 兜底通道，后续将优先走此通道）'), flush=True)
                 break
             client = OpenAI(api_key=API_KEY, base_url=api_url, timeout=60, max_retries=1)
             response = client.chat.completions.create(
