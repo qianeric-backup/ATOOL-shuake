@@ -61,6 +61,10 @@ class Yunbanke:
             headers.setdefault("X-token", self.token)
         kw.setdefault("timeout", 20)
         resp = self._session.request(method, url, headers=headers, **kw)
+        # HTTP 4xx/5xx（token 过期、限流 429、网关错误）不应被当业务数据处理
+        if resp.status_code >= 400:
+            raise YunbankeError(
+                "HTTP %d: %s" % (resp.status_code, resp.text[:200] if resp.text else ""))
         try:
             data = resp.json()
         except ValueError:

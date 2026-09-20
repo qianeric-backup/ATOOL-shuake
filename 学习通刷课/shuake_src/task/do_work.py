@@ -183,7 +183,8 @@ class do_work(Answer):
                                                                                      '[class*="clearfix answerBg"]')
             self.all_optionWebElementList.append(self.optionWebElementList)
             for option_element in self.optionWebElementList:
-                self.option_text_list.append(option_element.get_attribute('aria-label')[:-2])
+                # 选项缺 aria-label 时 get_attribute 返回 None，None[:-2] 会 TypeError 崩整卷
+                self.option_text_list.append((option_element.get_attribute('aria-label') or '')[:-2])
             self.all_title_dit[i] = self.title_and_option_text
             self.num_option_dit[i] = self.option_text_list
         print(color.red('正在搜索中，请耐心等待...'))

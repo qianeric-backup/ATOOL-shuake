@@ -161,8 +161,9 @@ async def get_video_attr(page, attr: str) -> any:
 
 async def get_lesson_name(page: Page, is_hike_class=False) -> str:
     if is_hike_class:
-        #title_ele1 = await page.wait_for_selector("#sourceTit")
-        title_ele = await page.wait_for_selector("span")
+        # 通用选择器 "span" 会命中 document 里第一个任意 span（多为导航元素）,
+        # title 属性常为 None → 日志记成"正在学习: None"
+        title_ele = await page.wait_for_selector("#sourceTit")
         await page.wait_for_timeout(500)
         title = await title_ele.get_attribute("title")
     else:

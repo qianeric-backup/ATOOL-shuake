@@ -386,6 +386,9 @@ async def main():
 
 def run() -> int:
     """刷课主入口; 返回退出码。GUI 模式调用此函数, 不再强制 input() 阻塞。"""
+    # main()/init_page() 等模块级函数直接引用全局 logger/config，
+    # 不声明 global 的话两者只是局部变量, main() 一进来就 NameError
+    global logger, config
     print_banner()
     logger = Logger()
     try:

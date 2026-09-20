@@ -41,7 +41,9 @@ async def get_course_progress(page: Page, is_new_version=False, is_hike_class=Fa
         if not is_hike_class:
             if is_new_version:
                 progress_ele = await cur_play.query_selector(".progress-num")
-                progress = await progress_ele.text_content()
+                # 慢渲染下二次查询仍可能为 None, 对 None 调方法会 AttributeError
+                # 中断全部刷课; 视为未完成继续等
+                progress = (await progress_ele.text_content()) if progress_ele else "0%"
                 finish = progress == "100%"
             else:
                 finish = await cur_play.query_selector(".time_icofinish")

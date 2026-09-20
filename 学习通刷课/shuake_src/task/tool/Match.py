@@ -40,9 +40,8 @@ def match(answer_options_dicts_lst, qType, question, answersList,  optionsWebEle
 
     elif qType=='多选题':
         # answer_options_dict = answer_options_dicts_lst[0] # 取列表中的第一个元素
-        for answer in answersList:
-            if answer is None:
-                answersList.remove(None)
+        # 边遍历边 remove 会跳过相邻 None，改为重建列表
+        answersList = [a for a in answersList if a is not None]
 
         answerWebElementList = []
         answers_list=[]

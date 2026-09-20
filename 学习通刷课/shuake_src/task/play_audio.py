@@ -4,6 +4,7 @@
 # For more information, see the LICENSE file in the root directory of this project.
 import time
 from selenium.webdriver.common.by import By
+from task.tool import color
 from task.tool.common import Common
 class Audio(Common):
     def __init__(self,driver,iframe_element):
@@ -23,10 +24,16 @@ class Audio(Common):
             time.sleep(0.1)
         # 检测是否完成播放
         while True:
-            self.driver.switch_to.default_content()
-            self.driver.switch_to.frame(self.driver.find_element(By.CSS_SELECTOR, '[id="iframe"]'))
-            if self.check_audio_finished():
-                break
+            try:
+                self.driver.switch_to.default_content()
+                self.driver.switch_to.frame(
+                    self.driver.find_element(By.CSS_SELECTOR, '[id="iframe"]'))
+                if self.check_audio_finished():
+                    break
+            except Exception:
+                # 页面跳转/元素引用失效会让检测抛异常；吞掉本轮继续轮询，
+                # 避免异常冒泡中断整页任务
+                print(color.red('音频完成状态检测异常，本轮重试'), flush=True)
             time.sleep(1)
 def play_audio(driver,iframe_element):
     audio = Audio(driver,iframe_element)

@@ -66,6 +66,11 @@ def finish_video_question(options_txt,options,answer,question_type):
             if answer[0] in option:
                 break
             option_num += 1
+        if option_num >= len(options_txt):
+            # AI 答案与任何选项都不匹配：越界会 IndexError 并被外层裸 except
+            # 吞掉导致 submit 不再点击——改为显式跳过本题
+            print(color.red(f'答案与选项不匹配，跳过该题'), flush=True)
+            return
         answer_num.append(option_num)
     elif question_type == '多选题':
         if len(answer) == 1:
@@ -113,8 +118,9 @@ def check_video_question(driver,API,video_title_choice,api_url='',api_model=''):
             else:
                 finish_video_question(options_txt,options,answer,question_type)
                 submit.click()
-        #随机答题
-        try:
+        #随机答题：仅随机模式进入，AI 模式已提交的答案不能被轮点覆盖
+        elif video_title_choice == '随机答题':
+          try:
             if question_type=='单选题' or question_type=='判断题':
                 for option in options:
                     option.click()
@@ -132,8 +138,8 @@ def check_video_question(driver,API,video_title_choice,api_url='',api_model=''):
                     last_ans_set=now_ans_set
                     #提交
                     submit.click()
-        except:
-            pass
+          except:
+              pass
         #继续学习
         try:
             continue_learn=element.find_element(By.ID,'videoquiz-continue')
@@ -364,6 +370,7 @@ def study_page(driver,course_name,lock_screen,API,video_title_choice,api_url='',
             print(color.yellow('请不要将窗口最小化，这有可能导致脚本异常\n视频播放完毕会自动跳转\n正在观看视频中……'),flush=True)
             driver.switch_to.default_content()
             driver.switch_to.frame('iframe')
+            global b, pause_start_time   # 显式重置全局，避免上个视频的暂停状态残留
             b = 0
             pause_start_time = 0  # 添加变量记录暂停开始时间
             check_vido_finish(driver,i,time_start,total_time,vido_iframe,lock_screen,API,video_title_choice,api_url=api_url,api_model=api_model)
@@ -382,9 +389,9 @@ def save_vido(driver,course_name):
     element = driver.find_element(By.CLASS_NAME, 'prev_title')
     title = element.get_attribute('title')
     try:
-        f = open(fr'task/record/《{course_name}》的刷课记录.txt', 'a', encoding='utf-8')
-        f.write(
-            f'已刷完:《{title}》章节中的所有视频\n完成时间：{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))}\n\n')
+        with open(fr'task/record/《{course_name}》的刷课记录.txt', 'a', encoding='utf-8') as f:
+            f.write(
+                f'已刷完:《{title}》章节中的所有视频\n完成时间：{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))}\n\n')
     except:
         pass
 

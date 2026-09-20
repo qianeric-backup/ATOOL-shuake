@@ -9,7 +9,8 @@ import traceback
 
 def send_error(txt):
     # 配置日志记录
-    logging.basicConfig(level=logging.ERROR, filename='error.log', filemode='w',
+    # filemode='a'：追加而非每次清空，保留历史错误记录
+    logging.basicConfig(level=logging.ERROR, filename='error.log', filemode='a',
                         format='%(asctime)s - %(levelname)s: %(message)s',encoding='utf-8')
     logging.error(txt)
 

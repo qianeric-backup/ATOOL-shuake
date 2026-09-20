@@ -23,9 +23,10 @@ class Live(Common):
         print('直播时长:',duration,flush=True)
         #静音
         self.driver.find_element(By.CLASS_NAME, "vjs-mute-control").click()
-        #计算直播时长的90%
-        duration_00=int(duration.split(':')[-1])*60+int(duration.split(':')[0])
-        time.sleep(duration_00)
+        #计算直播时长的90%（支持 m:ss 与 h:mm:ss）
+        t = [int(x) for x in duration.split(':')]
+        secs = (t[0]*3600 + t[1]*60 + t[2]) if len(t) == 3 else (t[0]*60 + t[1])
+        time.sleep(secs * 0.9)
         self.driver.close()
         turn_page(self.driver, '学生学习页面')
 

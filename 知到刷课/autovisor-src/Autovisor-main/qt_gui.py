@@ -28,6 +28,9 @@ from modules import paths
 import Autovisor
 
 
+# 队列哨兵：刷课线程结束标记，经日志队列送回主线程执行 UI 恢复
+GUI_DONE = "__GUI_TASK_DONE__"
+
 # ==== 配置读写 ====
 CONFIG_FILE = paths.config_path()
 
@@ -106,8 +109,9 @@ def run_shuake(log_queue: queue.Queue, on_done):
         log_queue.put(f"[GUI] 刷课线程异常: {e}\n")
     finally:
         sys.stdout, sys.stderr = old_stdout, old_stderr
-        log_queue.put("[GUI] 刷课进程已结束。\n")
-        on_done()
+        # 结束回调经队列带回主线程处理（QTimer 轮询 pump_log）,
+        # 工作线程直接操作 QWidget/QTimer 违反 Qt 线程规则
+        log_queue.put(GUI_DONE)
 
 
 # ==== 主窗口 ====
@@ -221,7 +225,11 @@ class MainWindow(QWidget):
     def pump_log(self):
         try:
             while True:
-                self._append_log(self._log_queue.get_nowait())
+                item = self._log_queue.get_nowait()
+                if item == GUI_DONE:
+                    self.on_shuake_done()
+                else:
+                    self._append_log(item)
         except queue.Empty:
             pass
 
@@ -259,7 +267,7 @@ class MainWindow(QWidget):
         try:
             save_form_values(cfg, self.driver_combo.currentText(),
                              url, self.user_edit.text().strip(),
-                             self.pass_edit.text(), str(int(limit)), str(speed),
+                             self.pass_edit.text(), str(limit), str(speed),
                              self.captcha_check.isChecked(),
                              self.hide_check.isChecked(),
                              self.mute_check.isChecked())

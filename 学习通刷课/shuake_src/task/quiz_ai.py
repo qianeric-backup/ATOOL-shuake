@@ -5,6 +5,7 @@
 import random
 import time
 import re
+import ast
 import asyncio
 import traceback
 
@@ -18,8 +19,10 @@ from task.tool.ai_wen_da import main,AnswerAPI,Question
 from task.tool.AIAsk import AIAsk
 from task.tool.send_wx import send_error
 
-# 设置默认编码为UTF-8
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# 设置默认编码为UTF-8（先冲刷旧缓冲并防止重复包裹导致日志丢失/句柄泄漏）
+sys.stdout.flush()
+if type(sys.stdout) is not io.TextIOWrapper:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 # 题型归一化：新版学习通页面在【】里输出英文题型标记
 # （如 TrueorFalse / SingleChoice / MultipleChoice / ShortAnswer / Completion），
@@ -160,6 +163,9 @@ class Answer:
                 self.option_text_list  =['']
             else:
                 print(color.red(f'第{i+1}题题型为{self.questionType},无法作答'))
+                # 占位必须追加，否则后面 supported 题在 all_optionWebElementList
+                # 中整体错位，会点到别的题的选项
+                self.all_optionWebElementList.append(None)
                 continue
             self.all_title_dit[i] = self.title_and_option_text
             self.num_option_dit[i] = self.option_text_list
@@ -176,7 +182,7 @@ class Answer:
                     print(color.red(f'第{i+1}题搜索失败：{e}'), flush=True)
 
                 if type(self.answer_list) is str:
-                    self.answer_list = eval(self.answer_list)
+                    self.answer_list = ast.literal_eval(self.answer_list)
                 if not self.answer_list:
                     try:
                         self.answer_list = asyncio.run(
@@ -185,7 +191,7 @@ class Answer:
                     except Exception as e:
                         print(color.red(f'第{i+1}题搜索失败：{e}'), flush=True)
                     if type(self.answer_list) is str:
-                        self.answer_list = eval(self.answer_list)
+                        self.answer_list = ast.literal_eval(self.answer_list)
             elif self.work_choice!='随机答题':
                 self.answer_list=[]
             elif self.work_choice=='随机答题':
@@ -391,7 +397,9 @@ class Answer:
             print(color.yellow('3秒后保存'), flush=True)
             time.sleep(3)
             self._click_btn(self._SAVE_BTN_CSS, '暂存保存')
-        elif self.after_finish_question=='强制自动提交'  or self.work_choice =='随机答题' or self.ans_rate >= self.after_finish_question:
+        elif (self.after_finish_question=='强制自动提交' or self.work_choice =='随机答题'
+              or (isinstance(self.after_finish_question, (int, float))
+                  and self.ans_rate >= self.after_finish_question)):
             # 点击提交
             print(color.yellow('3秒后提交'), flush=True)
             time.sleep(3)
@@ -427,16 +435,17 @@ class Answer:
         self.driver.switch_to.frame(self.frame)
         self.driver.switch_to.frame('frame_content')
         try:
-            f = open(fr'task/record/《{self.course_name}》的成绩记录.txt', 'a', encoding='utf-8')
-            element = self.driver.find_element(By.CSS_SELECTOR, '.achievement i')
-            score = element.text
-            f.write(
-                f'已完成:《{title}》章节中的测试题，完成时间：{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))}\n测试得分：{score}分(本次使用{self.work_choice})\n\n')
+            with open(fr'task/record/《{self.course_name}》的成绩记录.txt', 'a', encoding='utf-8') as f:
+                element = self.driver.find_element(By.CSS_SELECTOR, '.achievement i')
+                score = element.text
+                f.write(
+                    f'已完成:《{title}》章节中的测试题，完成时间：{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))}\n测试得分：{score}分(本次使用{self.work_choice})\n\n')
         except:
             print(color.yellow('未查询到本次测试成绩'), flush=True)
             try:
-                f.write(
-                f'已完成:《{title}》章节的测试题，完成时间：{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))}\n测试得分：未查询到(本次使用{self.work_choice})\n\n')
+                with open(fr'task/record/《{self.course_name}》的成绩记录.txt', 'a', encoding='utf-8') as f:
+                    f.write(
+                    f'已完成:《{title}》章节的测试题，完成时间：{time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))}\n测试得分：未查询到(本次使用{self.work_choice})\n\n')
             except:
                 pass
         self.driver.switch_to.default_content()

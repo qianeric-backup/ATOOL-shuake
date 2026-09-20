@@ -1,5 +1,6 @@
 import configparser
 import os
+import sys
 import threading
 from tkinter import ttk, messagebox
 import tkinter as tk
@@ -35,21 +36,27 @@ def show_help():
     messagebox.showinfo('使用说明', help_text)
 
 
+def _shuake_command():
+    """跨平台启动命令：不依赖 PATH 里有 'python'，且打包/精简环境同样可靠。"""
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Autovisor.py')
+    return '"%s" "%s"' % (sys.executable, script)
+
+
 def launch_script():
     messagebox.showinfo('启动中', '准备刷课！')
-    os.system('python Autovisor.py')
+    os.system(_shuake_command())
 
 
 def launch_script_in_thread():
-    threading.Thread(target=launch_script, daemon=True).start()
+    # 仅启动子进程在后台线程，Tk 组件调用（messagebox）必须留在主线程
+    messagebox.showinfo('启动中', '准备刷课！')
+    threading.Thread(target=lambda: os.system(_shuake_command()), daemon=True).start()
 
 
 def launch_direct():
-    def run():
-        messagebox.showinfo('提示', '已记录配置，开始刷课')
-        os.system('python Autovisor.py')
-
-    threading.Thread(target=run, daemon=True).start()
+    # Tk/Tcl 非线程安全，messagebox 不能在子线程里弹
+    messagebox.showinfo('提示', '已记录配置，开始刷课')
+    threading.Thread(target=lambda: os.system(_shuake_command()), daemon=True).start()
 
 
 def read_inputs():

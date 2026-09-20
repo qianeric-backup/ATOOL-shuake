@@ -91,8 +91,11 @@ async def skip_questions(page: Page, event_loop) -> None:
     while True:
         try:
             if "hike.zhihuishu.com" in page.url:
-                logger.warn("当前课程为新版本,不支持自动答题.", shift=True)
-                return
+                # 翻转课不答题, 但协程不能退出: 课程列表里 hike 课排前面时
+                # 直接 return 会让后面普通共享课失去自动答题
+                logger.debug("当前为翻转课,暂不答题.", shift=True)
+                await asyncio.sleep(5)
+                continue
             await asyncio.sleep(2)
             ques_element = await page.wait_for_selector(".el-scrollbar__view", state="attached", timeout=1000)
             total_ques = await ques_element.query_selector_all(".number")

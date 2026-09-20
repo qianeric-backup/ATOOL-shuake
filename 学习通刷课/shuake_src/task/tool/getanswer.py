@@ -12,8 +12,10 @@ from selenium.webdriver.common.by import By
 from task.tool import color
 
 
-# 修改 stdout 编码为 UTF-8
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# 修改 stdout 编码为 UTF-8（先冲刷旧缓冲并防止重复包裹）
+sys.stdout.flush()
+if type(sys.stdout) is not io.TextIOWrapper:
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 # 自定义文件
 class NoFoundAnswerException(Exception):
     """
