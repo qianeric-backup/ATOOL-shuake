@@ -24,7 +24,11 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QFont
 
-from modules import paths
+# 上游 3.18.3 重构后不再有 modules.paths，改为本文件内的路径定义
+import os
+
+def _base_dir():
+    return os.path.dirname(os.path.abspath(__file__))
 import Autovisor
 
 
@@ -32,7 +36,7 @@ import Autovisor
 GUI_DONE = "__GUI_TASK_DONE__"
 
 # ==== 配置读写 ====
-CONFIG_FILE = paths.config_path()
+CONFIG_FILE = os.path.join(_base_dir(), "config.ini")  # 上游配置名 config.ini
 
 
 def read_config() -> configparser.ConfigParser:
@@ -104,7 +108,7 @@ def run_shuake(log_queue: queue.Queue, on_done):
     sys.stdout = QueueWriter(log_queue)
     sys.stderr = QueueWriter(log_queue)
     try:
-        Autovisor.run()
+        Autovisor.cli()
     except Exception as e:  # 兜底, 避免线程静默死亡
         log_queue.put(f"[GUI] 刷课线程异常: {e}\n")
     finally:
