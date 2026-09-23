@@ -129,13 +129,36 @@ async def init_page(p: Playwright, config, cookies) -> tuple[Page, BrowserContex
             "--window-position=0,0",
         ],
     }
+    # 兼容 Firefox 驱动: 需其独立引擎且不能用 Chromium/通道 + chrome 专属
+    # 参数 (Firefox 会把不认识参数当"待打开网址", 生成 http://1600,900 假窗口)
+    is_firefox = (config.driver or "").lower() == "firefox"
+    engine = p.firefox if is_firefox else p.chromium
+    if is_firefox:
+        launch_args.pop("channel", None)
+        launch_args["args"] = ["-width", str(screen_width),
+                               "-height", str(screen_height)]
+        # 本地预装提示: PLAYWRIGHT_BROWSERS_PATH 指向的缓存里找不到 firefox
+        # 目录时给出安装建议（不阻塞启动, Playwright 会报更明确的错误）
+        browsers_dir = os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or os.path.expanduser("~/.cache/ms-playwright")
+        try:
+            has_ff = os.path.isdir(browsers_dir) and any(
+                d.startswith("firefox") for d in os.listdir(browsers_dir))
+        except OSError:
+            has_ff = False
+        if not has_ff:
+            logger.warn("本地未发现 playwright firefox 缓存组件; "
+                        "请先执行: python3 -m playwright install firefox")
+    elif (config.driver or "").lower() == "chromium":
+        # Linux 下 Playwright 自带 chromium; 若设了 channel 反而会找外部二进制
+        launch_args.pop("channel", None)
+    logger.event("启动浏览器", 引擎="firefox" if is_firefox else "chromium")
     try:
-        browser = await p.chromium.launch(**launch_args)
+        browser = await engine.launch(**launch_args)
     except TargetClosedError as exc:
         logger.log_exception("首次启动浏览器失败,准备重试.", exc)
         logger.info("检测到浏览器首次启动失败,正在重试...")
         await asyncio.sleep(1)
-        browser = await p.chromium.launch(**launch_args)
+        browser = await engine.launch(**launch_args)
     logger.event("浏览器已启动", 版本=getattr(browser, "version", "未知"))
     # 使用真实窗口尺寸，避免 Playwright 默认 viewport 覆盖最大化窗口。
     context = await browser.new_context(viewport=None)

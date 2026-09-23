@@ -291,11 +291,12 @@ async def skip_questions(page: Page, event_loop) -> None:
                 await asyncio.sleep(2)
                 if not await has_visible_element(page, (".topic-title",)):
                     continue
-                # 新版课中弹题优先尝试 AI 作答，失败再回落人工
+                # 关闭 AI 自动答题时直接走人工提示（原 3.18.3 行为）
                 ai_cfg = await asyncio.to_thread(ai_client.load_ai_config)
+                ai_ready = (ai_cfg.get("enabled") and ai_cfg.get("api_url")
+                            and ai_cfg.get("api_key") and ai_cfg.get("ai_id"))
                 ai_done = False
-                if ai_cfg.get("enabled") and ai_cfg.get("api_url") \
-                        and ai_cfg.get("api_key") and ai_cfg.get("ai_id"):
+                if ai_ready:
                     try:
                         ai_done = await _answer_topic_with_ai(page, ai_cfg)
                     except Exception as e:
@@ -333,6 +334,7 @@ async def skip_questions(page: Page, event_loop) -> None:
                 answered = 0
                 ai_solved = 0
                 ai_cfg = await asyncio.to_thread(ai_client.load_ai_config)
+                # 关闭 AI 自动答题(enabled=False)时完全不调用 AI, 恢复原答题模式
                 ai_ready = (ai_cfg.get("enabled") and ai_cfg.get("api_url")
                             and ai_cfg.get("api_key") and ai_cfg.get("ai_id"))
                 for ques in total_ques:
@@ -341,22 +343,22 @@ async def skip_questions(page: Page, event_loop) -> None:
                         answered += 1
                         continue
                     solved = False
-                    if ai_cfg.get("api_url") and ai_cfg.get("api_key"):
+                    if ai_ready:
                         try:
                             solved = await _answer_topic_with_ai(page, ai_cfg)
                             ai_solved += 1 if solved else 0
                         except Exception as e:
                             logger.debug(f"AI 答课中题异常: {logger.summarize_exception(e)}")
                     if not solved:
-                        # 无 AI 配置或 AI 答题失败：保持原前两个选项兜底
+                        # 原(3.18.3)答题模式：点前两个选项
                         choices = await page.query_selector_all(".topic-item")
                         for each in choices[:2]:
                             await each.click(timeout=500)
                             await page.wait_for_timeout(100)
                         answered += 1
-                extra = f" (AI 答对/尝试 {ai_solved})" if ai_solved or ai_cfg.get("enabled") else ""
                 logger.event("课中答题", 题目数=len(total_ques),
-                             已作答=answered, ai=ai_solved if (ai_cfg.get("enabled") or ai_solved) else "未启用")
+                             已作答=answered,
+                             ai=ai_solved if ai_ready else "未启用")
             await page.press(".el-dialog", "Escape", timeout=1000)
             event_loop.set()
         except TargetClosedError:

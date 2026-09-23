@@ -33,9 +33,29 @@ def get_effective_driver(config_driver: str) -> str:
 def resolve_browser_channel(driver: str) -> str | None:
     if driver == "edge":
         return "msedge"
-    if driver == "chromium":
+    if driver in ("chromium", "firefox"):
+        # firefox 不是 chromium channel，firefox 由 playwright.firefox.launch
+        # 单独驱动；chromium 用 playwright 自带二进制（无 channel）
         return None
     return driver
+
+
+def _is_firefox(config) -> bool:
+    return get_effective_driver(config.driver) == "firefox"
+
+
+def _firefox_launch_args(config) -> dict:
+    """Firefox 启动参数（Linux 兼容: 无 channel 概念; Chrome 系专属 args
+    会被 Firefox 当成"待打开网址"产生 http://1600,900 假标签，已改原生参数）."""
+    args = {"headless": False, "args": ["-width", "1600", "-height", "900"]}
+    path = resolve_executable_path("firefox", config.exe_path)
+    if path and path not in ("firefox",):
+        args["executable_path"] = path
+    return args
+
+
+def is_firefox_driver(config) -> bool:
+    return get_effective_driver(config.driver) == "firefox"
 
 
 def resolve_executable_path(driver: str, configured_path: str) -> str | None:
@@ -82,6 +102,11 @@ def _launch_args(config) -> dict:
     driver = get_effective_driver(config.driver)
     channel = resolve_browser_channel(driver)
     executable_path = resolve_executable_path(driver, config.exe_path)
+    args = {}
+    if driver == "firefox":
+        # Firefox 需要单独的驱动实例与专属启动参数（保留 Windows 亦可工作）
+        args.update(_firefox_launch_args(config))
+        return args
     args = {
         "headless": False,
         "args": [
@@ -93,16 +118,20 @@ def _launch_args(config) -> dict:
         args["executable_path"] = executable_path
     elif channel:
         args["channel"] = channel
+    # Linux 下 Chrome 系专用 kcargs 保持原样（Google/Edge/Chromium 均可）
+    if sys.platform.startswith("linux") and not channel:
+        args.setdefault("args", [])
     return args
 
 
 async def _launch_browser(playwright: Playwright, config, logger) -> Browser:
     launch_args = _launch_args(config)
+    engine = playwright.firefox if is_firefox_driver(config) else playwright.chromium
     try:
-        return await playwright.chromium.launch(**launch_args)
+        return await engine.launch(**launch_args)
     except TargetClosedError as exc:
         logger.log_exception("首次启动浏览器失败,准备重试.", exc)
-        return await playwright.chromium.launch(**launch_args)
+        return await engine.launch(**launch_args)
 
 
 async def create_browser_session(
