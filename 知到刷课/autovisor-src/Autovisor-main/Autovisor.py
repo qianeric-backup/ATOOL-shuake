@@ -150,10 +150,37 @@ async def auto_login(context: BrowserContext, page: Page, modules=None):
             cookie_saved = True
 
     await page.goto(config.login_url, wait_until="commit")
-    if "login" not in page.url:
+
+    # 登录墙可能被站点搬到弹出的新标签页（智慧树登录页会先经
+    # "http://1600,900" 之类的分辨率探测窗口再挂登录墙）。此时在本页上
+    # 等选择器会以 24h 默认超时永远卡住——先找到挂着登录墙的标签页。
+    async def find_wall_tab():
+        for p in list(context.pages):
+            try:
+                if await p.locator(".wall-main").count():
+                    return p
+            except Exception:
+                continue
+        return None
+
+    wall_tab = await find_wall_tab()
+    if wall_tab and wall_tab is not page:
+        logger.info("登录墙位于新标签页, 已切换主页面.")
+        page = wall_tab
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+    if not wall_tab and "login" not in page.url:
         logger.info("检测到已登录,跳过登录步骤.")
-        return
-    await page.wait_for_selector(".wall-main", state='attached')  # 等待登陆界面加载
+        return page
+    try:
+        await page.wait_for_selector(".wall-main", state='attached')
+    except Exception:
+        if "login" not in page.url:
+            logger.info("未出现登录墙, 视为已登录.")
+            return page
+        raise
     page.on('request', request_handler)
     if config.username and config.password:
         await page.wait_for_selector("#lUsername", state="attached")
@@ -165,7 +192,50 @@ async def auto_login(context: BrowserContext, page: Page, modules=None):
         await page.locator(".wall-sub-btn").first.click()
     if config.enableAutoCaptcha and modules:
         await slider_verify(page, modules)
-    await page.wait_for_selector(".wall-main", state='hidden')
+    # ---------- 等待登录完成（手动登录 / 新标签页登录兜底）----------
+    # 原实现死等本页 .wall-main 消失（默认超时被设成 24h）：登录发生在其它
+    # 标签页、或站点改版后登录墙不再按预期隐藏时，程序会永远卡在
+    # “正在等待登录完成”。改为轮询三种成功路径：
+    #   1) 本页登录墙消失；
+    #   2) 本页 URL 已离开 /login；
+    #   3) 用户在其它标签页登录成功——切换主页面引用。
+    async def save_login_once():
+        nonlocal cookie_saved
+        if cookie_saved:
+            return
+        try:
+            cookies = await context.cookies()
+            save_cookies(cookies, COOKIE_PATH)
+            logger.info(f"已保存登录凭证到: {COOKIE_PATH},下次可免密登录.")
+            cookie_saved = True
+        except Exception:
+            pass
+
+    deadline = asyncio.get_event_loop().time() + 30 * 60  # 最长等 30 分钟
+    while asyncio.get_event_loop().time() < deadline:
+        # 依据 DOM 判断登录态（URL host 不可靠——分辨率探测窗口
+        # "http://1600,900/" 上也可能挂着登录墙）：任何标签页"离开登录页
+        # 且没有登录墙"即视为已登录
+        for p in list(context.pages):
+            try:
+                u = p.url
+                if not u or u == "about:blank" or "login" in u:
+                    continue
+                if await p.locator(".wall-main").count():
+                    continue
+            except Exception:
+                continue
+            if p is not page:
+                logger.info("检测到登录完成于其它标签页, 已切换主页面.")
+                try:
+                    await p.bring_to_front()
+                except Exception:
+                    pass
+            await save_login_once()
+            return p
+        await asyncio.sleep(1)
+    logger.warn("等待登录超时(30分钟), 继续以当前页面状态尝试.")
+    return page
 
 
 async def ensure_login(context: BrowserContext, page: Page, cookies, modules=None):
@@ -175,7 +245,7 @@ async def ensure_login(context: BrowserContext, page: Page, cookies, modules=Non
         await page.wait_for_timeout(1500)
         if "login" not in page.url:
             logger.info("使用Cookies登录成功!")
-            return True
+            return page
         logger.warn("检测到 Cookies 已失效, 将重新登录.", shift=True)
         clear_cookies(COOKIE_PATH)
         cookies = None
@@ -183,9 +253,9 @@ async def ensure_login(context: BrowserContext, page: Page, cookies, modules=Non
     if not config.username or not config.password:
         logger.info("请手动填写账号密码...")
     logger.info("正在等待登录完成...")
-    await auto_login(context, page, modules)
+    page = await auto_login(context, page, modules)
     logger.info("登录成功!")
-    return False
+    return page
 
 
 async def learning_loop(page: Page, start_time, is_new_version=False, is_hike_class=False):
@@ -329,7 +399,8 @@ async def main():
         cookies = load_cookies(COOKIE_PATH)
         page, context = await init_page(p, cookies)
 
-        await ensure_login(context, page, cookies, modules)
+        # 等待登录的用户可能在其它标签页完成登录, 需要用返回的主页面继续
+        page = await ensure_login(context, page, cookies, modules)
 
         # 先启动人机验证协程
         verify_task = asyncio.create_task(wait_for_verify(page, config, event_loop_verify))
