@@ -58,6 +58,7 @@ wine-build/
 
 # 知到运行时依赖（pip 目标安装的 numpy/opencv，可按需重建）
 知到刷课/autovisor-src/Autovisor-main/res/
+# 本地 playwright 浏览器缓存（PLAYWRIGHT_BROWSERS_PATH 重定向到此，302MB）
+知到刷课/autovisor-src/Autovisor-main/.playwright_browsers/
 .runtime_libs/
 *.deb
-*.deb.*
