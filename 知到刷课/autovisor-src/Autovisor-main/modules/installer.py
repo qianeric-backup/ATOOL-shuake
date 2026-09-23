@@ -306,20 +306,32 @@ def install_package(package, version, mirrors, config_obj=config):
 
 
 # 下载器,启动!
-def start(config_obj=config):
+def start(config_obj=None):
     if os.name != "nt":
+        # Linux/macOS: 先把 packages/ 目录加入 sys.path（deb 运行时依赖
+        # 随包内置），再检查 numpy/opencv —— 缺失时降级为人工验证,
+        # 不再抛 RuntimeError 中断整个刷课流程（上游原实现引用了未定义
+        # 的 `packages` 变量, 一进依赖检查就 NameError 且直接终止主流程）
         modules = []
         missing = []
-        for package in packages:
+        try:
+            res_dir = get_res_dir()
+            os.makedirs(res_dir, exist_ok=True)
+            add_runtime_search_paths(res_dir)
+        except Exception:
+            pass
+        for package in runtime_packages():
             try:
                 modules.append(import_module(mapping[package]))
             except ImportError:
                 missing.append(package)
         if missing:
             names = ", ".join(missing)
-            raise RuntimeError(
-                f"缺少自动滑块依赖: {names}; 请运行 uv sync --extra captcha"
+            logger.warn(
+                f"自动滑块依赖缺失: {names}; 自动滑块验证将降级为人工处理 "
+                f"(可在 packages/ 内补齐依赖或运行 uv sync --extra captcha)"
             )
+            return []
         return modules
 
     validate_python_version()

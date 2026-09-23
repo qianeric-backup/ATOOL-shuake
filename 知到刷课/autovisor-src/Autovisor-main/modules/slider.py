@@ -117,10 +117,10 @@ async def move_slider(page: Page, distance, offset=36):
 
 async def slider_verify(page: Page, modules: list[ModuleType]):
     global cv2, np
-    np, cv2 = modules
-    if not cv2 or not np:
+    if len(modules) < 2 or not modules[0] or not modules[1]:
         logger.warn("OpenCV或Numpy导入失败,无法开启自动滑块验证.")
         return
+    np, cv2 = modules
     # 尝试自动验证3次
     isPassed = 0
     for x in range(0, 3):
