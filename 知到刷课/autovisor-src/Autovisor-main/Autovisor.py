@@ -106,6 +106,9 @@ async def init_page(p: Playwright, cookies) -> tuple[Page, BrowserContext]:
         except Exception as e:
             logger.warn(f"检查 Firefox 浏览器组件失败: {e}")
         del launch_args["channel"]
+        # Firefox 把不认识的参数当"要打开的网址" → 生成 http://1600,900/
+        # http://100,100 假标签；改用 Firefox 原生 -width/-height
+        launch_args["args"] = ["-width", "1600", "-height", "900"]
     browser_launch = p.firefox if is_firefox else p.chromium
     try:
         browser = await browser_launch.launch(**launch_args)
@@ -151,39 +154,66 @@ async def auto_login(context: BrowserContext, page: Page, modules=None):
 
     await page.goto(config.login_url, wait_until="commit")
 
-    # 登录墙可能被站点搬到弹出的新标签页（智慧树登录页会先经
-    # "http://1600,900" 之类的分辨率探测窗口再挂登录墙）。此时在本页上
-    # 等选择器会以 24h 默认超时永远卡住——先找到挂着登录墙的标签页。
-    async def find_wall_tab():
+    # ---------- 实测（2026-09 Linux/Playwright还原）：登录页已改版 ----------
+    # 新版"登录中心"(login.zhihuishu.com, Element-UI)：登录表单为
+    #   input[name=mobile] / input[type=password] / 提交按钮 .btn-block__grandient_login
+    # 旧版登录墙(.wall-main / #lUsername)仍兼容老入口；两者都探测并用。
+    # Firefox 启动参数里残留的 Chrome 专用 --window-size/--window-position
+    # 会被 Firefox 当作"要打开的网址"（http://1600,900 假标签）——此为垃圾
+    # 标签，判断登录态时要排除。
+    def is_junk_url(u):
+        # 分辨率探测假页面: http://1600,900/ 或 http://100,100
+        return u.startswith('http') and all(ch.isdigit() or ch in ",.,:" for ch in u.split("//", 1)[-1].split("/")[0])
+
+    async def find_login_form_tab():
         for p in list(context.pages):
             try:
-                if await p.locator(".wall-main").count():
+                if await p.locator('input[name="mobile"], #lUsername, .wall-main').count():
                     return p
             except Exception:
                 continue
         return None
 
-    wall_tab = await find_wall_tab()
-    if wall_tab and wall_tab is not page:
-        logger.info("登录墙位于新标签页, 已切换主页面.")
-        page = wall_tab
+    form_tab = await find_login_form_tab()
+    if form_tab and form_tab is not page:
+        logger.info("登录表单位于新标签页, 已切换主页面.")
+        page = form_tab
         try:
             await page.bring_to_front()
         except Exception:
             pass
-    if not wall_tab and "login" not in page.url:
+    if not form_tab and "login" not in page.url:
         logger.info("检测到已登录,跳过登录步骤.")
         return page
+
+    logged_out = False   # 快速路径：页面可能在 goto 后已是登录态
     try:
-        await page.wait_for_selector(".wall-main", state='attached')
+        await page.wait_for_selector('input[name="mobile"], #lUsername', state='attached', timeout=15000)
     except Exception:
         if "login" not in page.url:
-            logger.info("未出现登录墙, 视为已登录.")
+            logger.info("未出现登录表单, 视为已登录.")
             return page
-        raise
     page.on('request', request_handler)
-    if config.username and config.password:
-        await page.wait_for_selector("#lUsername", state="attached")
+    new_ui = bool(await page.locator('input[name="mobile"]').count())
+    if config.username and config.password and new_ui:
+        # 新版登录中心
+        await page.locator('input[name="mobile"]').fill(config.username)
+        await page.locator('input[type="password"]').first.fill(config.password)
+        # 新版要求先勾选"我已阅读并同意用户协议"，否则登录按钮无效
+        try:
+            agree_input = page.locator('input.el-checkbox__original').first
+            if await agree_input.count() and bool(await agree_input.is_checked()) is False:
+                await page.locator('.el-checkbox').first.click()
+                await page.wait_for_timeout(300)
+                if bool(await agree_input.is_checked()) is False:
+                    # 兜底：直接按文字找协议勾选框
+                    await page.locator('label:has-text("我已")').first.click()
+        except Exception as e:
+            logger.debug(f"勾选用户协议失败(可能已勾选): {e}")
+        await page.wait_for_timeout(500)
+        await page.locator('.btn-block__grandient_login').first.click()
+    elif config.username and config.password:
+        # 旧版登录墙
         await page.wait_for_selector("#lPassword", state="attached")
         await page.locator('#lUsername').fill(config.username)
         await page.locator('#lPassword').fill(config.password)
@@ -191,7 +221,12 @@ async def auto_login(context: BrowserContext, page: Page, modules=None):
         await page.wait_for_timeout(500)
         await page.locator(".wall-sub-btn").first.click()
     if config.enableAutoCaptcha and modules:
-        await slider_verify(page, modules)
+        try:
+            # 易盾滑块仅在触发风控时出现，存在才尝试自动验证
+            if await page.locator('.yidun_bgimg, .yidun_jigsaw').count():
+                await slider_verify(page, modules)
+        except Exception as e:
+            logger.debug(f"未检测到滑块或自动验证不可用: {e}")
     # ---------- 等待登录完成（手动登录 / 新标签页登录兜底）----------
     # 原实现死等本页 .wall-main 消失（默认超时被设成 24h）：登录发生在其它
     # 标签页、或站点改版后登录墙不再按预期隐藏时，程序会永远卡在
@@ -213,15 +248,14 @@ async def auto_login(context: BrowserContext, page: Page, modules=None):
 
     deadline = asyncio.get_event_loop().time() + 30 * 60  # 最长等 30 分钟
     while asyncio.get_event_loop().time() < deadline:
-        # 依据 DOM 判断登录态（URL host 不可靠——分辨率探测窗口
-        # "http://1600,900/" 上也可能挂着登录墙）：任何标签页"离开登录页
-        # 且没有登录墙"即视为已登录
+        # 登录完成判定：标签页"离开包含 login 的 URL、不是分辨率探测垃圾
+        # 页、且既无旧版登录墙也无新版登录表单"
         for p in list(context.pages):
             try:
                 u = p.url
-                if not u or u == "about:blank" or "login" in u:
+                if not u or u == "about:blank" or "login" in u or is_junk_url(u):
                     continue
-                if await p.locator(".wall-main").count():
+                if await p.locator(".wall-main, input[name=\"mobile\"]").count():
                     continue
             except Exception:
                 continue
