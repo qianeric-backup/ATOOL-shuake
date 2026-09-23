@@ -48,8 +48,11 @@ venv/
 学习通刷课/shuake_src/task/record/font_samples/
 
 # Wine 交叉构建环境（Windows Python prefix / 构建中间产物，共 ~3.7GB）
-wine-build/
+# Wine 交叉构建环境（prefix/home/cache 体积大, 按需重建）
+学习通刷课/wine-build/*
 !学习通刷课/wine-build/build.sh
+知到刷课/autovisor-src/Autovisor-main/wine-build/*
+!知到刷课/autovisor-src/Autovisor-main/wine-build/build.sh
 台账.txt
 .filter-backup/
 
