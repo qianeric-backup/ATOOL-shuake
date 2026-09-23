@@ -29,6 +29,21 @@ import os
 
 def _base_dir():
     return os.path.dirname(os.path.abspath(__file__))
+
+
+class _Paths:
+    """兼容旧 modules.paths 的轻量 shim（上游 3.18.3 已移除该模块）"""
+
+    @staticmethod
+    def runtime_root():
+        return _base_dir()
+
+    @staticmethod
+    def resource_path(*parts):
+        return os.path.join(_base_dir(), *parts)
+
+
+paths = _Paths()
 import Autovisor
 
 
