@@ -145,7 +145,10 @@ def is_installed(package, version):
         module = import_module(mapping[package])
         installed_version = getattr(module, "__version__", None)
         expected_version = normalize_version(package, version)
-        if installed_version and installed_version != expected_version:
+        # opencv 版本号是 4 段（如 4.10.0.82），按前 3 段比较，否则永远 !=
+        # 目标版本（4.10.0），每次启动都会重复下载安装
+        if installed_version and ".".join(str(installed_version).split(".")[:3]) != \
+                ".".join(str(expected_version).split(".")[:3]):
             logger.warn(f"检测到 {package}-{installed_version}，与目标版本 {version} 不一致，将重新安装。")
             return None, False
         logger.info(f"{package}-{version} 已安装！")

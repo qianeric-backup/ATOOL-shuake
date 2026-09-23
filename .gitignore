@@ -55,3 +55,9 @@ wine-build/
 
 # deb 打包产物
 学习通刷课/deb-build/pkg/
+
+# 知到运行时依赖（pip 目标安装的 numpy/opencv，可按需重建）
+知到刷课/autovisor-src/Autovisor-main/res/
+.runtime_libs/
+*.deb
+*.deb.*
