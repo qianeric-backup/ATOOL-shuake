@@ -14,6 +14,14 @@ command -v python3 >/dev/null 2>&1 || { echo "未找到 python3，请先安装 P
 # 2. libxcb-cursor 兜底（PySide6 xcb 插件依赖；系统缺失时使用用户目录副本）
 if [ -d "$HOME/.local/lib/xcblibs/pkg/usr/lib/x86_64-linux-gnu" ]; then
     export LD_LIBRARY_PATH="$HOME/.local/lib/xcblibs/pkg/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+elif [ -d "$SCRIPT_DIR/../../.runtime_libs/usr/lib/x86_64-linux-gnu" ]; then
+    # 仓库本地的 libxcb-cursor 副本（缺系统库时免 root 方案）
+    export LD_LIBRARY_PATH="$SCRIPT_DIR/../../.runtime_libs/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}"
+fi
+
+# 2b. playwright 浏览器缓存（本地缓存优先；否则退回 ~/.cache/ms-playwright）
+if [ -d "$SRC_DIR/.playwright_browsers" ]; then
+    export PLAYWRIGHT_BROWSERS_PATH="$SRC_DIR/.playwright_browsers"
 fi
 
 # 3. 依赖检查（缺失时提示安装）

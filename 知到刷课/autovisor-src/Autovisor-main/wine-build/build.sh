@@ -48,7 +48,8 @@ if ! wine "$PY" -c "import PyInstaller, PySide6, requests, playwright, numpy, cv
         numpy==1.26.4 opencv-python==4.10.0.82
 fi
 
-# 4. PyInstaller spec（onefile GUI 即 qt_gui）
+# 4. PyInstaller spec（onefile GUI 即 qt_gui）— 在 src/ 内构建（相对路径可控）
+cd src
 cat > "AutovisorGUI.spec" <<'SPEC'
 # -*- mode: python ; coding: utf-8 -*-
 block_cipher = None
@@ -58,7 +59,7 @@ a = Analysis(['qt_gui.py'],
              datas=[
                 ('resources', 'resources'),
                 ('data/mirrors.json', 'data'),
-                ('../config.ini.example', '.'),
+                ('config.ini.example', '.'),
              ],
              hiddenimports=['requests'],
              hookspath=[],
@@ -75,10 +76,9 @@ exe = EXE(pyz, a.scripts, a.binaries, a.zipfiles, a.datas, [],
           clean_dir=True)
 SPEC
 
-wine "$PY" -m PyInstaller "AutovisorGUI.spec" --noconfirm --clean \
-    --paths ../modules
+wine "$PY" -m PyInstaller "AutovisorGUI.spec" --noconfirm --clean
 
-# 5. 产物归档（拷出的 exe 放项目根; 构建中间件仍在 wine-build/）
-cp -f dist/AutovisorGUI.exe ../AutovisorGUI.exe
-ls -la ../AutovisorGUI.exe
-echo "完成: AutovisorGUI.exe -> $(cd .. && pwd)/AutovisorGUI.exe"
+# 5. 产物归档（exe 放 Autovisor-main/ 项目根；构建中间件留在 wine-build/src）
+cp -f dist/AutovisorGUI.exe ../../AutovisorGUI.exe
+ls -la ../../AutovisorGUI.exe
+echo "完成: AutovisorGUI.exe -> ../../AutovisorGUI.exe"
