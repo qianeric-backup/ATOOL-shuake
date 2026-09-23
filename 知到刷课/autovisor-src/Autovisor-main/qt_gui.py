@@ -85,11 +85,16 @@ def load_form_values(cfg: configparser.ConfigParser):
         get("script-option", "enableAutoCaptcha", "True") == "True",
         get("script-option", "enableHideWindow", "False") == "True",
         get("course-option", "soundOff", "True") == "True",
+        get("ai-option", "api_url", ""),
+        get("ai-option", "api_key", ""),
+        get("ai-option", "ai_id", ""),
+        get("ai-option", "ai_answer_enabled", "True") == "True",
     )
 
 
 def save_form_values(cfg: configparser.ConfigParser, driver, course_url, username, password,
-                     limit_time, speed, auto_captcha, hide_window, mute) -> None:
+                     limit_time, speed, auto_captcha, hide_window, mute,
+                     ai_url="", ai_key="", ai_model="", ai_enable=True) -> None:
     cfg.set("browser-option", "driver", driver)
     cfg.set("course-url", "URL1", course_url)
     cfg.set("user-account", "username", username)
@@ -99,6 +104,12 @@ def save_form_values(cfg: configparser.ConfigParser, driver, course_url, usernam
     cfg.set("script-option", "enableAutoCaptcha", str(auto_captcha))
     cfg.set("script-option", "enableHideWindow", str(hide_window))
     cfg.set("course-option", "soundOff", str(mute))
+    if not cfg.has_section("ai-option"):
+        cfg.add_section("ai-option")
+    cfg.set("ai-option", "api_url", ai_url)
+    cfg.set("ai-option", "api_key", ai_key)
+    cfg.set("ai-option", "ai_id", ai_model)
+    cfg.set("ai-option", "ai_answer_enabled", str(bool(ai_enable)))
     write_config(cfg)
 
 
@@ -198,6 +209,34 @@ class MainWindow(QWidget):
         btn_row.addWidget(self.start_btn)
         btn_row.addWidget(open_btn)
 
+        # ==== AI 配置（api_url / api_key / AI ID + 拉取/连通性测试）====
+        ai_head = QLabel("AI 接口（自动答题：课中题/课程测试）:")
+        form.addRow(ai_head)
+
+        self.ai_url_edit = QLineEdit()
+        self.ai_url_edit.setPlaceholderText("https://api.deepseek.com/v1 (OpenAI 风格)")
+        self.ai_key_edit = QLineEdit()
+        self.ai_key_edit.setEchoMode(QLineEdit.Password)
+        self.ai_key_edit.setPlaceholderText("sk-...（不回显）")
+        self.ai_model_combo = QComboBox()
+        self.ai_model_combo.setEditable(True)
+        form.addRow("API 地址:", self.ai_url_edit)
+        form.addRow("API Key:", self.ai_key_edit)
+        ai_model_row = QHBoxLayout()
+        ai_model_row.addWidget(QLabel("AI ID:"))
+        ai_model_row.addWidget(self.ai_model_combo, 1)
+        form.addRow(ai_model_row)
+        self.ai_refresh_btn = QPushButton("刷新模型列表")
+        self.ai_test_btn = QPushButton("测试连通性")
+        self.ai_auto_check = QCheckBox("启用 AI 自动答题")
+        self.ai_auto_check.setChecked(True)
+        ai_btn_row = QHBoxLayout()
+        ai_btn_row.addWidget(self.ai_refresh_btn)
+        ai_btn_row.addWidget(self.ai_test_btn)
+        ai_btn_row.addWidget(self.ai_auto_check)
+        ai_btn_row.addStretch(1)
+        form.addRow(ai_btn_row)
+
         # 日志区
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
@@ -212,9 +251,9 @@ class MainWindow(QWidget):
         layout.addWidget(log_label)
         layout.addWidget(self.log_view)
 
-        # 载入已有配置
-        cfg = read_config()
-        (driver, url, user, pwd, t, sp, cap, hide, mute) = load_form_values(cfg)
+        config = read_config()
+        (driver, url, user, pwd, t, sp, cap, hide, mute,
+         ai_url, ai_key, ai_model, ai_on) = load_form_values(config)
         idx = self.driver_combo.findText(driver, Qt.MatchFixedString)
         if idx >= 0:
             self.driver_combo.setCurrentIndex(idx)
@@ -226,9 +265,18 @@ class MainWindow(QWidget):
         self.captcha_check.setChecked(cap)
         self.hide_check.setChecked(hide)
         self.mute_check.setChecked(mute)
+        self.ai_url_edit.setText(ai_url)
+        self.ai_key_edit.setText(ai_key)
+        self.ai_model_combo.setCurrentText(ai_model)
+        self.ai_auto_check.setChecked(ai_on)
 
         self.start_btn.clicked.connect(self.on_start)
         open_btn.clicked.connect(self.on_open_config)
+        self.ai_refresh_btn.clicked.connect(self.on_ai_refresh)
+        self.ai_test_btn.clicked.connect(self.on_ai_test)
+        if self.ai_url_edit.text().strip() and self.ai_key_edit.text().strip():
+            # 启动后自动拉一次模型列表（后台线程；有保存的模型配置）
+            QTimer.singleShot(500, lambda: self.on_ai_refresh(auto=True))
 
         # 日志轮询
         self._timer = QTimer(self)
@@ -247,10 +295,90 @@ class MainWindow(QWidget):
                 item = self._log_queue.get_nowait()
                 if item == GUI_DONE:
                     self.on_shuake_done()
+                elif item.startswith("[AI] MODELS|"):
+                    payload = item[len("[AI] MODELS|"):]
+                    ok_flag, _, rest = payload.partition("|")
+                    ids = rest.split(";") if (ok_flag == "OK" and rest) else []
+                    self._on_ai_models(ids)
+                    self._append_log(
+                        ("[AI] 拉到 %d 个模型\n" % len(ids)) if ok_flag == "OK"
+                        else "[AI] 拉取失败: %s\n" % rest)
+                elif item.startswith("[AI] TEST|"):
+                    ok_flag, _, rest = item[len("[AI] TEST|"):].partition("|")
+                    self._append_log(("[AI] 连通性测试: %s\n" % rest)
+                                     if ok_flag == "OK" else
+                                     "[AI] 连通性测试失败: %s\n" % rest)
                 else:
                     self._append_log(item)
         except queue.Empty:
             pass
+
+    # ---------- AI 配置相关 ----------
+    def _ai_save_settings(self):
+        """把界面上 AI 设置写入 config.ini（供后台线程读取运行中生效）"""
+        cfg = read_config()
+        if "ai-option" not in cfg:
+            cfg["ai-option"] = {}
+        cfg["ai-option"]["api_url"] = self.ai_url_edit.text().strip()
+        cfg["ai-option"]["api_key"] = self.ai_key_edit.text().strip()
+        cfg["ai-option"]["ai_id"] = self.ai_model_combo.currentText().strip()
+        cfg["ai-option"]["ai_answer_enabled"] = str(self.ai_auto_check.isChecked())
+        try:
+            write_config(cfg)
+        except Exception as e:
+            self._append_log("[AI] 写入配置失败: %s\n" % e)
+
+    def on_ai_refresh(self, auto=False):
+        """拉取该 API 下的所有模型 ID（用后台线程，不阻塞 Qt）"""
+        import modules.ai_client as ai_client
+        api_url = self.ai_url_edit.text().strip()
+        api_key = self.ai_key_edit.text()
+        if not api_url or not api_key:
+            if not auto:
+                QMessageBox.information(self, "AI 配置", "请先填写 API 地址与 API Key 再拉取。")
+            return
+        if not auto:
+            self._ai_save_settings()
+        self.ai_refresh_btn.setEnabled(False)
+        self._append_log("[AI] 正在拉取模型列表...(auto=%s)\n" % auto)
+
+        def worker():
+            try:
+                ids = ai_client.list_models(api_url, api_key)
+                line = "[AI] MODELS|OK|%s" % ";".join(ids)
+            except Exception as e:
+                line = "[AI] MODELS|FAIL|%s" % e
+            self._log_queue.put(line)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def on_ai_test(self):
+        """连通性测试：/models 探活 + 用当前 AI ID 发一条 ping"""
+        import modules.ai_client as ai_client
+        self._ai_save_settings()
+        api_url, api_key = self.ai_url_edit.text().strip(), self.ai_key_edit.text()
+        model = self.ai_model_combo.currentText().strip()
+        self.ai_test_btn.setEnabled(False)
+        self._append_log("[AI] 正在测试连通性...\n")
+
+        def worker():
+            try:
+                ai_client.test_connection(api_url, api_key, model or None)
+                line = "[AI] TEST|OK|通过（models 与 chat 均可达）"
+            except Exception as e:
+                line = "[AI] TEST|FAIL|%s" % e
+            self._log_queue.put(line)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_ai_models(self, ids):
+        current = self.ai_model_combo.currentText().strip()
+        self.ai_model_combo.clear()
+        self.ai_model_combo.addItems(ids)
+        if current:
+            self.ai_model_combo.setCurrentText(current)
+        elif ids:
+            self.ai_model_combo.setCurrentText(ids[0])
 
     def on_open_config(self):
         """跨平台打开配置文件：Windows 用 os.startfile，Linux/macOS 用 xdg-open/open"""
@@ -289,9 +417,13 @@ class MainWindow(QWidget):
                              self.pass_edit.text(), str(limit), str(speed),
                              self.captcha_check.isChecked(),
                              self.hide_check.isChecked(),
-                             self.mute_check.isChecked())
+                             self.mute_check.isChecked(),
+                             self.ai_url_edit.text().strip(),
+                             self.ai_key_edit.text(),
+                             self.ai_model_combo.currentText().strip(),
+                             self.ai_auto_check.isChecked())
         except Exception as e:
-            QMessageBox.critical(self, "保存失败", f"写入 configs.ini 失败:\n{e}")
+            QMessageBox.critical(self, "保存失败", f"写入 config.ini 失败:\n{e}")
             return
 
         self._running = True

@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 
 from playwright.async_api import TimeoutError
@@ -8,6 +9,7 @@ from modules.utils import get_video_attr, display_window, hide_window, run_on
 from playwright._impl._errors import TargetClosedError
 from modules.logger import Logger
 from modules.video_state import video_at_end
+import modules.ai_client as ai_client
 
 logger = Logger()
 
@@ -228,6 +230,59 @@ async def play_video(
             continue
 
 
+async def _answer_topic_with_ai(page: Page, ai_cfg) -> bool:
+    """用 AI 解并点击当前可见的课中弹选项；成功返回 True."""
+    import modules.ai_client as _ai  # 延迟导入: GUI/脚本均可独立运行
+
+    title_el = await page.query_selector(
+        '.topic-title, .tkItem_title, .topic-content-title, '
+        '.el-dialog .el-dialog__title, .student-topic .student-topic-title')
+    title = (await title_el.text_content() or "").strip() if title_el else ""
+    # 优化的选项集合：兼容旧版 .topic-item / 新版可能的常见选择器
+    topic_items = await page.query_selector_all(".topic-item")
+    options = []
+    for opt in topic_items:
+        text = (await opt.text_content() or "").strip()
+        if text:
+            options.append(text)
+    if not title:
+        # 无标题容错：把弹窗前两行文本当题干发给 AI
+        dialog = await page.query_selector(".el-dialog")
+        if dialog:
+            body_lines = [ln.strip() for ln in (await dialog.text_content() or "").split("\n") if ln.strip()]
+            title = " ".join(body_lines[:2])[:400]
+    if not title:
+        return False
+    question_type = "单选" if ("单选" in title or len(options) <= 3) else (
+        "多选" if ("多选" in (title or "")) or (options and len(options) > 2) else "未知")
+    answer = _ai.ask_question(question_type, title, options or None, cfg=ai_cfg)
+    if not answer:
+        return False
+    # answer: "A/B" abc形式或完整选项文本——匹配 DOM 里最像的项
+    answers = [a.strip() for a in re.split(r"[;；,，]", answer) if a.strip()]
+
+    async def match(opt_text):
+        from modules.logger import logger
+        return any(seg and (seg in opt_text or opt_text.lower() in seg.lower())
+                   for seg in answers)
+
+    clicked = 0
+    for opt_text, item in zip(options, topic_items):
+        if await match(opt_text):
+            try:
+                await item.click(timeout=800)
+                await page.wait_for_timeout(150)
+                clicked += 1
+            except Exception:
+                continue
+    if clicked:
+        logger.event("AI 答课中题", 题型=question_type, 命中选项=clicked,
+                     选项数=len(options))
+        return True
+    logger.debug("AI 返回答案与选项无法匹配, 已按普通流程兜底.")
+    return False
+
+
 async def skip_questions(page: Page, event_loop) -> None:
     await page.wait_for_load_state("domcontentloaded")
     while True:
@@ -236,6 +291,31 @@ async def skip_questions(page: Page, event_loop) -> None:
                 await asyncio.sleep(2)
                 if not await has_visible_element(page, (".topic-title",)):
                     continue
+                # 新版课中弹题优先尝试 AI 作答，失败再回落人工
+                ai_cfg = await asyncio.to_thread(ai_client.load_ai_config)
+                ai_done = False
+                if ai_cfg.get("enabled") and ai_cfg.get("api_url") \
+                        and ai_cfg.get("api_key") and ai_cfg.get("ai_id"):
+                    try:
+                        ai_done = await _answer_topic_with_ai(page, ai_cfg)
+                    except Exception as e:
+                        logger.debug(f"新版弹题 AI 作答异常: {logger.summarize_exception(e)}")
+                if ai_done:
+                    # 提交按钮（存在则点击），随后等待弹题消失
+                    for submit_sel in (".topic-foot-answer, .topic-submit, "
+                                       ".el-button--primary", ".submitBtn"):
+                        try:
+                            btn = await page.query_selector(submit_sel)
+                        except Exception:
+                            btn = None
+                        if btn:
+                            await btn.click(timeout=800)
+                            break
+                    await asyncio.sleep(1.5)
+                    if not await has_visible_element(page, (".topic-title",)):
+                        logger.event("新版课中弹题", 处理方式="AI", 地址=page.url)
+                        event_loop.set()
+                        continue
                 logger.warn("检测到新版课中弹题,请在浏览器中手动处理.", shift=True)
                 logger.event("新版课中弹题", 处理方式="手动", 地址=page.url)
                 while await has_visible_element(page, (".topic-title",)):
@@ -251,15 +331,32 @@ async def skip_questions(page: Page, event_loop) -> None:
             total_ques = await ques_element.query_selector_all(".number")
             if total_ques:
                 answered = 0
+                ai_solved = 0
+                ai_cfg = await asyncio.to_thread(ai_client.load_ai_config)
+                ai_ready = (ai_cfg.get("enabled") and ai_cfg.get("api_url")
+                            and ai_cfg.get("api_key") and ai_cfg.get("ai_id"))
                 for ques in total_ques:
                     await ques.click(timeout=500)
-                    if not await page.query_selector(".answer"):
+                    if await page.query_selector(".answer"):
+                        answered += 1
+                        continue
+                    solved = False
+                    if ai_cfg.get("api_url") and ai_cfg.get("api_key"):
+                        try:
+                            solved = await _answer_topic_with_ai(page, ai_cfg)
+                            ai_solved += 1 if solved else 0
+                        except Exception as e:
+                            logger.debug(f"AI 答课中题异常: {logger.summarize_exception(e)}")
+                    if not solved:
+                        # 无 AI 配置或 AI 答题失败：保持原前两个选项兜底
                         choices = await page.query_selector_all(".topic-item")
                         for each in choices[:2]:
                             await each.click(timeout=500)
                             await page.wait_for_timeout(100)
                         answered += 1
-                logger.event("课中答题", 题目数=len(total_ques), 已作答=answered)
+                extra = f" (AI 答对/尝试 {ai_solved})" if ai_solved or ai_cfg.get("enabled") else ""
+                logger.event("课中答题", 题目数=len(total_ques),
+                             已作答=answered, ai=ai_solved if (ai_cfg.get("enabled") or ai_solved) else "未启用")
             await page.press(".el-dialog", "Escape", timeout=1000)
             event_loop.set()
         except TargetClosedError:
