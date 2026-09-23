@@ -106,9 +106,19 @@ def download_wheel(mirror_name, base_url, package_name, version=None):
     response.raise_for_status()
     # 获取系统架构
     arch = get_system_arch()
-    # 匹配 .whl 文件链接
-    pattern = re.compile(rf'href="(?:\.\./)*([^"]+{arch}\.whl[^"]+)"')
-    whl_links = pattern.findall(response.text)
+    # 抓取全部 .whl 链接再过滤：老式正则只认 linux_x86_64 字面量，而现代
+    # wheel 命名是 manylinux2014_x86_64 / manylinux_2_17_x86_64，
+    # 直接用旧正则在阿里等源上一个都匹配不到
+    whl_links = re.findall(r'href="(?:\.\./)*([^"]+\.whl[^"]*)"', response.text)
+    py_tag = "cp%d%d" % (sys.version_info[0], sys.version_info[1])  # 如 cp312
+    abi = [l for l in whl_links if py_tag in l]
+    if not abi:   # 某些包（如 opencv-python）用稳定 ABI 的 cp37-abi3 wheel
+        abi = [l for l in whl_links if "abi3" in l or "py3" in l]
+    if abi:
+        whl_links = abi
+    # 仍需兼容本机架构（x86_64/aarch64）或纯 Python 轮
+    whl_links = [l for l in whl_links
+                 if arch in l or "manylinux" in l or "none-any" in l]
     if not whl_links:
         raise ValueError(f"没有找到合适版本的 {package_name}.whl 文件!")
 
@@ -183,6 +193,12 @@ def start():
     res_dir = get_res_dir()
     os.makedirs(res_dir, exist_ok=True)
     add_runtime_search_paths(res_dir)
+    # Autovisor.py 顶层 import numpy 会在 res/ 加入 sys.path 之前引入
+    # 系统版本并缓存进 sys.modules；不清理的话安装器永远看到旧版本，
+    # 陷入"检测到 x.y 不一致→重装"循环
+    for stale in [m for m in list(sys.modules)
+                  if m.split(".")[0] in ("numpy", "cv2")]:
+        del sys.modules[stale]
     mirror_name, base_url = None, None  # 避免重复测试镜像
     for package, version in packages.items():
         module, exist = is_installed(package, version)
