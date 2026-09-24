@@ -400,7 +400,8 @@ async def main(config) -> bool:
         logger.info("所有课程已学习完毕!")
     else:
         logger.info("本轮已按每门课程时限结束,仍有课程未完成.", shift=True)
-    show_donate(get_runtime_path("resources", "QRcode.jpg"), show=config.showDonateCode)
+    # 用户要求: 不弹出作者页 QRcode（show_donate 调用已移出主流程）
+    print("如果觉得对你有帮助, 请为本项目点亮 star 吧~")
     return True
 
 
