@@ -28,6 +28,9 @@ class Config:
             self.enableAutoCaptcha = self.get_bool_field('script-option', 'enableAutoCaptcha')
             self.enableHideWindow = self.get_bool_field('script-option', 'enableHideWindow')
             self.showDonateCode = self.get_bool_field("script-option", "showDonateCode")
+            # 浏览器额外行为
+            self.keepWindowActive = self.get_bool_field(
+                'browser-option', 'keepWindowActive', fallback=True)
             # 课程选项
             self.soundOff = self.get_bool_field('course-option', 'soundOff')
             self.course_match_rule = re.compile("https://[-A-Za-z0-9+&@#/%?=~_|!:,.;]+[-A-Za-z0-9+&@#/%=~_|]")

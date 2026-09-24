@@ -174,9 +174,33 @@ async def init_page(p: Playwright, config, cookies) -> tuple[Page, BrowserContex
         js = f.read()
     await page.add_init_script(js)
     logger.debug("stealth.js执行完成.")
+    # 页面切后台（最小化/其他标签）时浏览器会把 document.hidden 置真、节流
+    # 计时器、播放器自身检测到可见性变化就暂停视频或延迟弹题调度；
+    # ——伪装为"一直可见"+拦截 blur/visibilitychange 关键事件
+    if getattr(config, "keepWindowActive", True):
+        await page.add_init_script(KEEP_ACTIVE_JS)
+        logger.debug("防后台节流脚本注入完成.")
     page.set_default_timeout(24 * 3600 * 1000)
 
     return page, context
+
+
+# 页面层反后台节流（文档级可见性伪装，仅脚本层面；引擎级节流由
+# keepWindowActive 的周期性 bring_to_front 兜底）
+KEEP_ACTIVE_JS = r"""
+(function () {
+  try {
+    Object.defineProperty(document, 'hidden', {get: function () { return false;
+    }, configurable: true});
+    Object.defineProperty(document, 'visibilityState', {
+      get: function () { return 'visible'; }, configurable: true});
+  } catch (e) {}
+  document.addEventListener('visibilitychange', function (e) {
+    e.stopImmediatePropagation(); e.stopPropagation(); }, true);
+  window.addEventListener('blur', function (e) {
+    e.stopImmediatePropagation(); e.stopPropagation(); }, true);
+})();
+"""
 
 
 async def auto_login(context: BrowserContext, page: Page, config, modules=None) -> None:
@@ -283,7 +307,7 @@ async def main(config) -> bool:
                         wait_for_verify(page, config, event_loop_verify)
                     ),
                     asyncio.create_task(video_optimize(page, config)),
-                    asyncio.create_task(skip_questions(page, event_loop_answer)),
+                    asyncio.create_task(skip_questions(page, config, event_loop_answer)),
                     asyncio.create_task(play_video(page, playback_enabled)),
                 ]
             )

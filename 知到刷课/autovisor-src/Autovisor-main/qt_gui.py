@@ -89,12 +89,14 @@ def load_form_values(cfg: configparser.ConfigParser):
         get("ai-option", "api_key", ""),
         get("ai-option", "ai_id", ""),
         get("ai-option", "ai_answer_enabled", "True") == "True",
+        get("browser-option", "keepWindowActive", "True") == "True",
     )
 
 
 def save_form_values(cfg: configparser.ConfigParser, driver, course_url, username, password,
                      limit_time, speed, auto_captcha, hide_window, mute,
-                     ai_url="", ai_key="", ai_model="", ai_enable=True) -> None:
+                     ai_url="", ai_key="", ai_model="", ai_enable=True,
+                     bg_keep=True) -> None:
     cfg.set("browser-option", "driver", driver)
     cfg.set("course-url", "URL1", course_url)
     cfg.set("user-account", "username", username)
@@ -104,6 +106,7 @@ def save_form_values(cfg: configparser.ConfigParser, driver, course_url, usernam
     cfg.set("script-option", "enableAutoCaptcha", str(auto_captcha))
     cfg.set("script-option", "enableHideWindow", str(hide_window))
     cfg.set("course-option", "soundOff", str(mute))
+    cfg.set("browser-option", "keepWindowActive", str(bool(bg_keep)))
     if not cfg.has_section("ai-option"):
         cfg.add_section("ai-option")
     cfg.set("ai-option", "api_url", ai_url)
@@ -194,10 +197,12 @@ class MainWindow(QWidget):
         self.captcha_check = QCheckBox("自动滑块验证")
         self.hide_check = QCheckBox("隐藏浏览器窗口")
         self.mute_check = QCheckBox("静音播放")
+        self.bg_keep_check = QCheckBox("防最小化暂停")
         check_row = QHBoxLayout()
         check_row.addWidget(self.captcha_check)
         check_row.addWidget(self.hide_check)
         check_row.addWidget(self.mute_check)
+        check_row.addWidget(self.bg_keep_check)
         check_row.addStretch(1)
         form.addRow(check_row)
 
@@ -265,6 +270,7 @@ class MainWindow(QWidget):
         self.captcha_check.setChecked(cap)
         self.hide_check.setChecked(hide)
         self.mute_check.setChecked(mute)
+        self.bg_keep_check.setChecked(bg_keep)
         self.ai_url_edit.setText(ai_url)
         self.ai_key_edit.setText(ai_key)
         self.ai_model_combo.setCurrentText(ai_model)
@@ -421,7 +427,8 @@ class MainWindow(QWidget):
                              self.ai_url_edit.text().strip(),
                              self.ai_key_edit.text(),
                              self.ai_model_combo.currentText().strip(),
-                             self.ai_auto_check.isChecked())
+                             self.ai_auto_check.isChecked(),
+                             self.bg_keep_check.isChecked())
         except Exception as e:
             QMessageBox.critical(self, "保存失败", f"写入 config.ini 失败:\n{e}")
             return

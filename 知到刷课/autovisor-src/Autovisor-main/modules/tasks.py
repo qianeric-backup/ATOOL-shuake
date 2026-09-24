@@ -98,11 +98,34 @@ async def task_monitor(tasks: list[asyncio.Task]) -> None:
     logger.info("任务监控已退出.", shift=True)
 
 
+_last_front_ts = 0.0
+FRONT_INTERVAL = 45.0
+
+
+async def maybe_bring_to_front(page: Page, config) -> None:
+    """后台节流兜底: keepWindowActive 开启时, 每隔 FRONT_INTERVAL 秒
+    将页面 bring_to_front, 保证 Playwright 的自动化点击在窗口被最小化
+    /切走焦点后仍可靠（浏览器在后台页对 input 合成事件的处理可能被节流）。"""
+    global _last_front_ts
+    if not getattr(config, "keepWindowActive", True):
+        return
+    now = time.time()
+    if now - _last_front_ts < FRONT_INTERVAL:
+        return
+    try:
+        await page.bring_to_front()
+        _last_front_ts = now
+        logger.debug("bringToFront 兜底将页面置于前台.")
+    except Exception as e:
+        logger.debug(f"bring_to_front 失败: {logger.summarize_exception(e)}")
+
+
 async def video_optimize(page: Page, config: Config) -> None:
     await page.wait_for_load_state("domcontentloaded")
     while True:
         try:
             await asyncio.sleep(2)
+            await maybe_bring_to_front(page, config)
             try:
                 await page.wait_for_selector("video", state="attached", timeout=3000)
             except TimeoutError:
@@ -283,10 +306,11 @@ async def _answer_topic_with_ai(page: Page, ai_cfg) -> bool:
     return False
 
 
-async def skip_questions(page: Page, event_loop) -> None:
+async def skip_questions(page: Page, config, event_loop) -> None:
     await page.wait_for_load_state("domcontentloaded")
     while True:
         try:
+            await maybe_bring_to_front(page, config)
             if "studywisdomh5.zhihuishu.com" in page.url:
                 await asyncio.sleep(2)
                 if not await has_visible_element(page, (".topic-title",)):
