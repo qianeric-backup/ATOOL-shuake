@@ -1,0 +1,49 @@
+name: 学习通 Windows exe 打包（学习助手）
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "xuexitong-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build deps
+        run: |
+          pip install -q -r 学习通刷课/shuake_src/requirements.txt
+          pip install -q "pyinstaller>=6.5" "PySide6==6.9.*"
+
+      - name: Build 学习通刷课.exe (onefile)
+        shell: pwsh
+        working-directory: 学习通刷课/shuake_src
+        run: |
+          $ErrorActionPreference = "Stop"
+          python -m PyInstaller 学习通刷课.spec --noconfirm --clean
+          Get-Item dist/*.exe | Select-Object Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 学习通刷课.exe
+          path: 学习通刷课/shuake_src/dist/*.exe
+          retention-days: 14
+
+      - name: Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 学习通刷课/shuake_src/dist/*.exe
+          generate_release_notes: true
