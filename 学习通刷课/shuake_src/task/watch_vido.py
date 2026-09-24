@@ -4,6 +4,7 @@
 # For more information, see the LICENSE file in the root directory of this project.
 import json
 import random
+import re
 from selenium.common import  NoAlertPresentException
 import time
 import ast
@@ -154,26 +155,111 @@ def check_video_question(driver,API,video_title_choice,api_url='',api_model=''):
     except:
         return
 
-def set_video_rate(driver, speed):
-    """直接设置 <video> 的 playbackRate（JS 注入，不依赖快捷键/焦点/倍速扩展）。
+_LAST_RATE_CALL = [None, 0.0, None, False]
+ANTI_BG_JS = (
+    "try { Object.defineProperty(document, 'hidden', {get: function(){"
+    "return false;}, configurable: true}); } catch (e) {}"
+    "try { Object.defineProperty(document, 'visibilityState', "
+    "{get: function(){return 'visible';}, configurable: true}); }"
+    " catch (e) {}"
+    "try { document.addEventListener('visibilitychange',"
+    " function(e){e.stopImmediatePropagation();}, true); } catch (e) {}"
+    "try { window.addEventListener('blur',"
+    " function(e){e.stopImmediatePropagation();}, true); } catch (e) {}"
+)
 
-    旧链路（倍速扩展 d 键 + ActionChains/send_keys）只在按键焦点恰好位于
-    视频 iframe 时生效；无头模式下焦点在章节树层，视频页监听器永远收不到，
-    导致倍速形同虚设。playbackRate 直设对有头/无头同样可靠，
-    由 check_vido_finish 轮询每秒校正（播放器内部可能重置速率）。"""
+
+def set_video_rate(driver, speed):
+    """真正把倍速应用到 <video>（考虑跨 iframe 的超星视频播放器结构）。
+
+    根因（"提速刷课不生效"的技术真相）：超星视频播放器封在
+    mooc1-api.chaoxing.com/ananas/... 嵌套 iframe 里。章节树/外层 document
+    里执行 document.querySelectorAll('video') 拿不到任何 video 同源元素，
+    倍速一直形同虚设。
+
+    修复:
+      1. 按当前 frame 树做深度遍历（Selenium 可跨 iframe 切换），对每个
+         document 执行 playbackRate = speed，播放器若重置由每秒轮询校正；
+      2. 同步给视频 iframe 内 document 注入"伪前台"脚本——解决"web 页
+         不在前端时页面无法自动点击/播放被 JS 停播"的另一层问题；
+      3. 缓存去重：同倍速 0.6s 内已过一遍则跳过（高频轮询保护）；
+      4. 兜底骚扰链路: 点击真实倍速控件（.speedTab/[data-rate]）。
+    """
     try:
         rate = float(speed)
     except Exception:
         rate = 1.0
     if rate <= 0:
         rate = 1.0
+    now = time.time()
     try:
-        driver.execute_script(
-            'document.querySelectorAll("video").forEach(function(v){'
-            '  try { v.playbackRate = arguments[0]; } catch(e) {} });',
-            rate)
+        same_once = (_LAST_RATE_CALL[0] == rate
+                     and now - _LAST_RATE_CALL[1] < 0.6)
+    except Exception:
+        same_once = False
+    if same_once:
+        return
+    _LAST_RATE_CALL[0], _LAST_RATE_CALL[1] = rate, now
+
+    script = (
+        'document.querySelectorAll("video").forEach(function(v){'
+        'try{v.playbackRate=arguments[0];}catch(e){}});'
+        + ANTI_BG_JS)
+
+    def dfs(depth: int = 0):
+        if depth > 6:
+            return
+        try:
+            driver.execute_script(script, rate)
+        except Exception:
+            pass
+        try:
+            iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        except Exception:
+            iframes = []
+        for f in iframes:
+            try:
+                driver.switch_to.frame(f)
+            except Exception:
+                continue
+            dfs(depth + 1)
+            driver.switch_to.parent_frame()
+    dfs()
+
+    # 兜底：点击真实倍速控件（若播放器内 JS 出风控未响应）
+    try:
+        _click_rate_widget(driver, rate)
     except Exception:
         pass
+
+
+def _click_rate_widget(driver, rate):
+    """尝试点击真实倍速面板/元素 (即使 video JS 失效也走 UI 真实路径).
+
+    兼容多种媒体播放器的已知控件类名（部分超星版本使用 .speedTab 与
+    [data-rate]）。
+    返回 bool: 是否点击命中。"""
+    selectors = (".speedTab", "[data-rate]", ".rateList [data-rate]",
+                 ".videoRate")
+    for sel in selectors:
+        try:
+            elems = driver.find_elements(By.CSS_SELECTOR, sel)
+        except Exception:
+            continue
+        for el in elems:
+            try:
+                txt = (el.get_attribute("data-rate")
+                       or (el.text or "").strip())
+                txt_num = re.sub(r"[^\d.]", "", txt.split("x")[0])
+                if not txt_num:
+                    continue
+                if abs(float(txt_num) - rate) < 0.01:
+                    if el.is_displayed():
+                        driver.execute_script("arguments[0].click();", el)
+                        return True
+            except Exception:
+                continue
+    return False
 
 
 def check_vido_play(driver, last_time, current_time):
