@@ -23,6 +23,7 @@ REQ_TIMEOUT_ASK = 60
 
 _LAST_ERROR = ""
 _msg_lock = None
+_UA = "Mozilla/5.0 Playwright-autovisor / requests"
 
 
 class AIClientError(Exception):
@@ -38,10 +39,101 @@ def normalize_base(api_url):
     base = (api_url or "").strip().rstrip("/")
     if not base:
         raise AIClientError("API 地址为空")
+    # Anthropic 协议 base(如 https://api.deepseek.com/anthropic) 原样返回
+    if is_anthropic_base(base):
+        return base
     # 若没带 /v* 结尾，常见 baseURL 需要补 /v1
     if not re.search(r"/v\d+(?:\.\d+)?(?:/.*)?$", base):
         base += "/v1"
     return base
+
+
+def is_anthropic_base(api_url) -> bool:
+    """识别 Anthropic 风格 base (…/anthropic 或 anthropic 网关)."""
+    return "/anthropic" in (api_url or "").lower()
+
+
+def _anthropic_messages(messages, model, api_url, api_key, timeout=REQ_TIMEOUT_ASK,
+                        max_tokens=None):
+    """Anthropic 协议: POST {base}/v1/messages; 返回文本内容."""
+    import requests as _req
+    base = normalize_base(api_url)
+    if not max_tokens or max_tokens < 1024:
+        max_tokens = 2048  # 思考型模型(deepseek-flash 等)需要为 thinking 留够预算
+    url = f"{base}/v1/messages"
+    sys_text = "\n".join(m.get("content", "") for m in messages if m.get("role") == "system")
+    user_msgs = [m for m in messages if m.get("role") != "system"]
+    payload = {
+        "model": model,
+        "system": sys_text or None,
+        "messages": [{"role": m.get("role", "user"),
+                      "content": m.get("content", "")} for m in user_msgs],
+        "temperature": 0.1,
+        "max_tokens": max_tokens,
+    }
+    if not sys_text:
+        payload.pop("system", None)
+    headers = {
+        "x-api-key": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": _UA,
+    }
+    try:
+        resp = _req.post(url, headers=headers, json=payload, timeout=timeout)
+    except _req.exceptions.RequestException as e:
+        raise AIClientError(f"连接失败: {summarize(e)}") from e
+    data = _check_resp(resp, "请求补全(anthropic)")
+    try:
+        content = data.get("content") or []
+        # deepseek-flash 等模型会先产生 "thinking"/"finish_reason" 块, 只拼 text
+        text = "".join(c.get("text", "") for c in content
+                       if isinstance(c, dict) and c.get("type") != "thinking")
+        if text:
+            return text
+        raise AIClientError(f"anthropic 响应无内容: {json.dumps(data, ensure_ascii=False)[:200]}")
+    except AIClientError:
+        raise
+    except Exception as e:
+        raise AIClientError(f"anthropic 响应格式异常: {e}") from e
+
+
+ANTHROPIC_FALLBACK_MODELS = ["deepseek-flash", "deepseek-chat", "deepseek-reasoner"]
+
+
+def _anthropic_list_models(api_url, api_key, timeout=REQ_TIMEOUT_MODELS):
+    """Anthropic 协议: GET {base}/v1/models; 没有该端点(常见 404)时返回兜底列表."""
+    import requests as _req
+    base = normalize_base(api_url)
+    url = f"{base}/v1/models"
+    headers = {
+        "x-api-key": api_key,
+        "Authorization": f"Bearer {api_key}",
+        "anthropic-version": "2023-06-01",
+        "Accept": "application/json",
+        "User-Agent": _UA,
+    }
+    try:
+        resp = _req.get(url, headers=headers, timeout=timeout)
+        data = _check_resp(resp, "拉取模型列表(anthropic)")
+        raw = data.get("data") if isinstance(data, dict) else data
+        raw = raw or []
+    except AIClientError:
+        raw = []          # 404 / 空 -> 走兜底
+    except Exception:
+        raw = []
+    ids = []
+    for item in raw:
+        mid = (item.get("id") or item.get("name") or item.get("model") or "") \
+            if isinstance(item, dict) else str(item)
+        if mid:
+            ids.append(str(mid))
+    if not ids:
+        # DeepSeek anthropic 网关只提供 /v1/messages, 无 /models: 用常用模型兜底
+        ids = list(ANTHROPIC_FALLBACK_MODELS)
+    return sorted(set(ids))
 
 
 def load_ai_config(config_path=None):
@@ -81,7 +173,7 @@ def _headers(api_key):
         "Content-Type": "application/json",
         "Accept": "application/json",
         # 某些镜像源对浏览器 UA 403, 用脚本统一的 UA
-        "User-Agent": "Mozilla/5.0 Playwright-autovisor / requests; AsyncPlaywright",
+        "User-Agent": _UA,
     }
 
 
@@ -100,6 +192,8 @@ def list_models(api_url, api_key, timeout=REQ_TIMEOUT_MODELS):
     if not api_url or not api_key:
         raise AIClientError("需要先填写 API 地址和 ApiKey")
     base = normalize_base(api_url)
+    if is_anthropic_base(base):
+        return _anthropic_list_models(base, api_key, timeout=timeout)
     url = f"{base}/models"
     try:
         resp = _req.get(url, headers=_headers(api_key), timeout=timeout)
@@ -142,6 +236,9 @@ def test_connection(api_url, api_key, model=None, timeout=REQ_TIMEOUT_MODELS):
 
 def chat_completion(messages, model, api_url, api_key, timeout=REQ_TIMEOUT_ASK,
                     max_tokens=512):
+    if is_anthropic_base(api_url):
+        return _anthropic_messages(messages, model, api_url, api_key,
+                                   timeout=timeout, max_tokens=max_tokens)
     import requests as _req
     base = normalize_base(api_url)
     url = f"{base}/chat/completions"

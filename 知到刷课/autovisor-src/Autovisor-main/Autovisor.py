@@ -311,6 +311,20 @@ async def main(config) -> bool:
                     asyncio.create_task(play_video(page, playback_enabled)),
                 ]
             )
+            if getattr(config, "doExam", False):
+                # 平时测试自动做题: 弹出的 dohomework 页交给 AI 自动作答
+                try:
+                    import modules.ai_client as ai_client
+                    import modules.exam_integrate as exam_integrate
+                    ai_cfg = ai_client.load_ai_config()
+                    tasks.append(asyncio.create_task(
+                        exam_integrate.watch_exam_pages(
+                            context, ai_cfg=ai_cfg,
+                            submit=getattr(config, "doExamSubmit", False))))
+                    logger.event("自动做题", 状态="已启动",
+                                 弹窗来源="课程页【平时测试】")
+                except Exception as exc:
+                    logger.warn(f"自动做题任务启动失败: {exc}")
             logger.event(
                 "后台任务启动",
                 任务=", ".join(task.get_coro().__name__ for task in tasks),

@@ -56,8 +56,9 @@ CONFIG_FILE = os.path.join(_base_dir(), "config.ini")  # 上游配置名 config.
 
 def read_config() -> configparser.ConfigParser:
     cfg = configparser.ConfigParser()
+    # utf-8-sig 同时兼容带/不带 BOM 的写法
     try:
-        cfg.read(CONFIG_FILE, encoding="utf-8")
+        cfg.read(CONFIG_FILE, encoding="utf-8-sig")
     except Exception:
         cfg.read(CONFIG_FILE, encoding="gbk")
     return cfg
@@ -90,13 +91,14 @@ def load_form_values(cfg: configparser.ConfigParser):
         get("ai-option", "ai_id", ""),
         get("ai-option", "ai_answer_enabled", "True") == "True",
         get("browser-option", "keepWindowActive", "True") == "True",
+        get("script-option", "enableAutoExam", "False") == "True",
     )
 
 
 def save_form_values(cfg: configparser.ConfigParser, driver, course_url, username, password,
                      limit_time, speed, auto_captcha, hide_window, mute,
                      ai_url="", ai_key="", ai_model="", ai_enable=True,
-                     bg_keep=True) -> None:
+                     bg_keep=True, auto_exam=False) -> None:
     cfg.set("browser-option", "driver", driver)
     cfg.set("course-url", "URL1", course_url)
     cfg.set("user-account", "username", username)
@@ -107,6 +109,7 @@ def save_form_values(cfg: configparser.ConfigParser, driver, course_url, usernam
     cfg.set("script-option", "enableHideWindow", str(hide_window))
     cfg.set("course-option", "soundOff", str(mute))
     cfg.set("browser-option", "keepWindowActive", str(bool(bg_keep)))
+    cfg.set("script-option", "enableAutoExam", str(bool(auto_exam)))
     if not cfg.has_section("ai-option"):
         cfg.add_section("ai-option")
     cfg.set("ai-option", "api_url", ai_url)
@@ -147,6 +150,45 @@ def run_shuake(log_queue: queue.Queue, on_done):
         log_queue.put(GUI_DONE)
 
 
+def run_doexam(log_queue: queue.Queue, on_done, exam_url, engine="firefox",
+               submit=False, headless=False):
+    """后台线程: 自动做题 (requests SSO + Playwright + 课中题同源 AI)."""
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    sys.stdout = QueueWriter(log_queue)
+    sys.stderr = QueueWriter(log_queue)
+    try:
+        import modules.ai_client as ai_client
+        import modules.exam_worker as worker
+
+        ai_cfg = ai_client.load_ai_config()
+        if not ai_client.is_configured(ai_cfg):
+            raise RuntimeError("AI 配置缺失 (api_url/api_key/ai_id)")
+
+        async def _go():
+            cookies = worker.sso_cookies()
+            from playwright.async_api import async_playwright
+            async with async_playwright() as p:
+                browser, ctx, page = await worker.open_exam_page(
+                    p, exam_url, cookies,
+                    engine={"Firefox": "firefox", "Edge": "chromium",
+                            "Chrome": "chromium"}.get(engine, "firefox"),
+                    headless=True)
+                try:
+                    result = await worker.run_exam(page, exam_url, ai_cfg, submit=submit)
+                    print(f"做题完成: {result}\n")
+                finally:
+                    await browser.close()
+
+        asyncio.run(_go())
+    except Exception as e:
+        log_queue.put(f"[做题] 异常: {e}\n")
+        import traceback
+        log_queue.put(traceback.format_exc()[-2000:] + "\n")
+    finally:
+        sys.stdout, sys.stderr = old_stdout, old_stderr
+        log_queue.put(GUI_DONE)
+
+
 # ==== 主窗口 ====
 class MainWindow(QWidget):
     def __init__(self):
@@ -154,6 +196,7 @@ class MainWindow(QWidget):
         self.setWindowTitle("Autovisor - 智慧树刷课助手")
         self.setMinimumSize(600, 520)
         self._running = False
+        self._exam_running = False
         self._log_queue = queue.Queue()
 
         # 顶部标题
@@ -198,21 +241,36 @@ class MainWindow(QWidget):
         self.hide_check = QCheckBox("隐藏浏览器窗口")
         self.mute_check = QCheckBox("静音播放")
         self.bg_keep_check = QCheckBox("防最小化暂停")
+        self.auto_exam_check = QCheckBox("平时测试自动做题")
+        self.auto_exam_check.setToolTip("刷课遇到【平时测试】弹出的做题页时,"
+                                        "自动用同一 AI 配置完成作答(答完自动关闭弹窗)")
         check_row = QHBoxLayout()
         check_row.addWidget(self.captcha_check)
         check_row.addWidget(self.hide_check)
         check_row.addWidget(self.mute_check)
         check_row.addWidget(self.bg_keep_check)
+        check_row.addWidget(self.auto_exam_check)
         check_row.addStretch(1)
         form.addRow(check_row)
 
         # 按钮
         self.start_btn = QPushButton("开始刷课")
         self.start_btn.setMinimumHeight(34)
+        self.doexam_btn = QPushButton("自动做题")
+        self.doexam_btn.setToolTip("打开作业/考试链接, AI 自动作答(与课中题同一 AI 配置)")
         open_btn = QPushButton("打开配置文件")
         btn_row = QHBoxLayout()
         btn_row.addWidget(self.start_btn)
+        btn_row.addWidget(self.doexam_btn)
         btn_row.addWidget(open_btn)
+
+        # 作业/考试链接 (dohomework)
+        self.exam_edit = QLineEdit()
+        self.exam_edit.setPlaceholderText("做题链接: https://onlineexamh5new.zhihuishu.com/stuExamWeb.html#/webExamList/dohomework/...")
+        self.exam_submit_check = QCheckBox("答完自动提交")
+        exam_row = QHBoxLayout()
+        exam_row.addWidget(self.exam_submit_check)
+        form.addRow("做题链接:", self.exam_edit)
 
         # ==== AI 配置（api_url / api_key / AI ID + 拉取/连通性测试）====
         ai_head = QLabel("AI 接口（自动答题：课中题/课程测试）:")
@@ -258,7 +316,7 @@ class MainWindow(QWidget):
 
         config = read_config()
         (driver, url, user, pwd, t, sp, cap, hide, mute,
-         ai_url, ai_key, ai_model, ai_on) = load_form_values(config)
+         ai_url, ai_key, ai_model, ai_on, bg_keep, auto_exam) = load_form_values(config)
         idx = self.driver_combo.findText(driver, Qt.MatchFixedString)
         if idx >= 0:
             self.driver_combo.setCurrentIndex(idx)
@@ -271,12 +329,14 @@ class MainWindow(QWidget):
         self.hide_check.setChecked(hide)
         self.mute_check.setChecked(mute)
         self.bg_keep_check.setChecked(bg_keep)
+        self.auto_exam_check.setChecked(auto_exam)
         self.ai_url_edit.setText(ai_url)
         self.ai_key_edit.setText(ai_key)
         self.ai_model_combo.setCurrentText(ai_model)
         self.ai_auto_check.setChecked(ai_on)
 
         self.start_btn.clicked.connect(self.on_start)
+        self.doexam_btn.clicked.connect(self.on_doexam)
         open_btn.clicked.connect(self.on_open_config)
         self.ai_refresh_btn.clicked.connect(self.on_ai_refresh)
         self.ai_test_btn.clicked.connect(self.on_ai_test)
@@ -428,7 +488,8 @@ class MainWindow(QWidget):
                              self.ai_key_edit.text(),
                              self.ai_model_combo.currentText().strip(),
                              self.ai_auto_check.isChecked(),
-                             self.bg_keep_check.isChecked())
+                             self.bg_keep_check.isChecked(),
+                             self.auto_exam_check.isChecked())
         except Exception as e:
             QMessageBox.critical(self, "保存失败", f"写入 config.ini 失败:\n{e}")
             return
@@ -443,6 +504,59 @@ class MainWindow(QWidget):
     def on_shuake_done(self):
         self._running = False
         self.start_btn.setEnabled(True)
+
+    # ---------- 自动做题 ----------
+    def on_doexam(self):
+        if self._exam_running:
+            self._append_log("[做题] 已在做题中, 请勿重复启动。\n")
+            return
+        exam_url = self.exam_edit.text().strip()
+        if "dohomework" not in exam_url:
+            QMessageBox.warning(self, "缺少做题链接",
+                                "请先粘贴作业/考试做题链接 (dohomework 链接)。")
+            return
+        # AI 配置即时保存到 config.ini (与课中题同源)
+        self._ai_save_settings()
+        # 浏览器驱动/账号也顺手保存
+        try:
+            cfg = read_config()
+            save_form_values(cfg, self.driver_combo.currentText(),
+                             self.course_edit.text().strip(),
+                             self.user_edit.text().strip(),
+                             self.pass_edit.text(), "0", "1.0",
+                             self.captcha_check.isChecked(),
+                             self.hide_check.isChecked(),
+                             self.mute_check.isChecked(),
+                             self.ai_url_edit.text().strip(),
+                             self.ai_key_edit.text(),
+                             self.ai_model_combo.currentText().strip(),
+                             self.ai_auto_check.isChecked(),
+                             self.bg_keep_check.isChecked(),
+                             self.auto_exam_check.isChecked())
+        except Exception:
+            pass
+
+        import modules.ai_client as _ai
+        ai_cfg = _ai.load_ai_config()
+        if not _ai.is_configured(ai_cfg):
+            QMessageBox.warning(self, "AI 配置缺失",
+                                "请先填写 API 地址 / API Key / AI ID (与课中题同一份配置)。")
+            return
+        engine = self.driver_combo.currentText()
+        submit_btn = self.exam_submit_check.isChecked()
+
+        self._exam_running = True
+        self.doexam_btn.setEnabled(False)
+        self._append_log(f"[{datetime.now():%H:%M:%S}] 开始自动做题...\n")
+        threading.Thread(
+            target=run_doexam,
+            args=(self._log_queue, self.on_doexam_done, exam_url,
+                  engine, submit_btn),
+            daemon=True).start()
+
+    def on_doexam_done(self):
+        self._exam_running = False
+        self.doexam_btn.setEnabled(True)
 
     def closeEvent(self, event):
         self._timer.stop()

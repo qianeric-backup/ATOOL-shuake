@@ -67,3 +67,7 @@ venv/
 知到刷课/autovisor-src/Autovisor-main/.playwright_browsers/
 .runtime_libs/
 *.deb
+
+知到刷课/autovisor-src/Autovisor-main/data/exam_cookies.json
+
+知到刷课/autovisor-src/Autovisor-main/config.ini
