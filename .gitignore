@@ -53,6 +53,7 @@ venv/
 !学习通刷课/wine-build/build.sh
 知到刷课/autovisor-src/Autovisor-main/wine-build/*
 !知到刷课/autovisor-src/Autovisor-main/wine-build/build.sh
+!知到刷课/autovisor-src/Autovisor-main/wine-build/AutovisorGUI.spec
 台账.txt
 .filter-backup/
 

@@ -1,0 +1,71 @@
+name: 知到 Windows exe 打包（AutovisorGUI）
+
+on:
+  workflow_dispatch: {}
+  push:
+    tags:
+      - "autovisor-v*"
+      - "知到*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows-exe:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install build deps
+        run: |
+          pip install -q "pyinstaller>=6.5" "PySide6==6.9.*" requests "playwright>=1.40" "numpy==1.26.4" "opencv-python==4.10.0.82"
+
+      - name: Build AutovisorGUI.exe (onedir→onefile)
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+        working-directory: 知到刷课/autovisor-src/Autovisor-main/wine-build
+        run: |
+          $ErrorActionPreference = "Stop"
+          $appRoot = Resolve-Path ..
+          $src = Join-Path (Get-Location) "src"
+          # 同步源码树到 ASCII 工作目录（排除本机运行数据与构建中间件）
+          New-Item -ItemType Directory -Force -Path $src | Out-Null
+          Get-ChildItem $appRoot -Force | Where-Object {
+              $_.Name -notin @(
+                  'wine-build','deb-build','.playwright_browsers','.pw-browsers',
+                  '.runtime_libs','logs','__pycache__','.pytest_cache','.github',
+                  'AutovisorGUI.exe','config.ini','data'
+              ) -and $_.Name -notmatch '\.(zip|exe|deb|pyc)$'
+          } | ForEach-Object {
+              Copy-Item $_.FullName -Destination $src -Recurse -Force
+          }
+          New-Item -ItemType Directory -Force -Path (Join-Path $src 'data') | Out-Null
+          Copy-Item (Join-Path $appRoot 'data/mirrors.json') (Join-Path $src 'data') -Force -ErrorAction SilentlyContinue
+          Copy-Item -ErrorAction SilentlyContinue `
+            (Join-Path (Get-Location) 'AutovisorGUI.spec') `
+            (Join-Path $src 'AutovisorGUI.spec')
+          Set-Location $src
+          python -m PyInstaller AutovisorGUI.spec --noconfirm --clean
+          Copy-Item dist/AutovisorGUI.exe $appRoot/AutovisorGUI.exe -Force
+          Get-Item $appRoot/AutovisorGUI.exe | Select-Object Name, Length
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: AutovisorGUI.exe
+          path: 知到刷课/autovisor-src/Autovisor-main/AutovisorGUI.exe
+          retention-days: 14
+
+      - name: Release (tag push only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: 知到刷课/autovisor-src/Autovisor-main/AutovisorGUI.exe
+          generate_release_notes: true
