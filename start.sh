@@ -23,9 +23,9 @@ printf "请选择 [1/2/3/q] > "
 
 run() {
     case "$1" in
-        1) bash "$ROOT/Linux版/学习通刷课/run_linux.sh" ;;
-        2) bash "$ROOT/Linux版/云班课刷课助手/run_linux.sh" ;;
-        3) bash "$ROOT/Linux版/知到刷课(Autovisor)/run_linux.sh" ;;
+        1) bash "$ROOT/学习通刷课/启动.sh" ;;
+        2) bash "$ROOT/云班课刷课/启动.sh" ;;
+        3) bash "$ROOT/知到刷课/启动.sh" ;;
         *) return ;;
     esac
 }

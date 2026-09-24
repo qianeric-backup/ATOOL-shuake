@@ -3,9 +3,9 @@
 # 用法: bash run_linux.sh
 set -e
 
-# 0. 定位源码目录（本脚本位于 Linux版/云班课刷课助手/，源码在仓库根 云班课刷课/yunbanke_qt/）
+# 0. 定位源码目录（本脚本位于 Linux版/云班课刷课助手/，源码为同目录 yunbanke_qt/）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$SCRIPT_DIR/../../云班课刷课/yunbanke_qt"
+SRC_DIR="$SCRIPT_DIR/yunbanke_qt"
 [ -f "$SRC_DIR/main.py" ] || { echo "未找到源码: $SRC_DIR/main.py"; exit 1; }
 
 # 1. 检查 Python

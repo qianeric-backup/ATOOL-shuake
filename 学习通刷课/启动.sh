@@ -3,9 +3,9 @@
 # 用法: bash run_linux.sh
 set -e
 
-# 0. 定位源码目录（本脚本位于 Linux版/学习通刷课/，源码在仓库根 学习通刷课/shuake_src/）
+# 0. 定位源码目录（本脚本位于 Linux版/学习通刷课/，源码在同目录 shuake_src/）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$SCRIPT_DIR/../../学习通刷课/shuake_src"
+SRC_DIR="$SCRIPT_DIR/shuake_src"
 [ -f "$SRC_DIR/qt_ui.py" ] || { echo "未找到源码: $SRC_DIR/qt_ui.py"; exit 1; }
 
 # 1. 检查 Python

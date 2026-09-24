@@ -3,9 +3,9 @@
 # 用法: bash run_linux.sh
 set -e
 
-# 0. 定位源码目录（本脚本位于 Linux版/知到刷课(Autovisor)/，源码在仓库根 知到刷课/autovisor-src/Autovisor-main/）
+# 0. 定位源码目录（本脚本位于 Linux版/知到刷课(Autovisor)/，源码为同目录 autovisor-src/Autovisor-main/）
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$SCRIPT_DIR/../../知到刷课/autovisor-src/Autovisor-main"
+SRC_DIR="$SCRIPT_DIR/autovisor-src/Autovisor-main"
 [ -f "$SRC_DIR/qt_gui.py" ] || { echo "未找到源码: $SRC_DIR/qt_gui.py"; exit 1; }
 
 # 1. 检查 Python
