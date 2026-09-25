@@ -23,7 +23,7 @@ jobs:
 
       - name: Install build deps
         run: |
-          pip install -q "pyinstaller>=6.5" "PySide6==6.9.*" requests "playwright>=1.40" "numpy==1.26.4" "opencv-python==4.10.0.82"
+          pip install -q "pyinstaller>=6.5" "PySide6==6.9.*" requests "playwright>=1.40" "numpy==1.26.4" "opencv-python==4.10.0.82" "pygetwindow==0.0.9"
 
       - name: Build zhidaoshuake.exe (onefile)
         shell: pwsh

@@ -15,7 +15,7 @@ a = Analysis(['qt_gui.py'],
                 # 否则 exe 单独跑会报 playwright 未就绪
                 *collect_data_files('playwright', include_py_files=True),
              ],
-             hiddenimports=['requests'],
+             hiddenimports=['requests', 'pygetwindow'],
              hookspath=[],
              runtime_hooks=[],
              excludes=['tkinter'],
