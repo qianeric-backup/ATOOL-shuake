@@ -158,6 +158,8 @@ class TimerDialog(QDialog):
 
 # ---------------------------------------------------------------- 主窗口 ----
 class StartWindow(QMainWindow):
+    # 自动下载浏览器驱动（按钮 → 后台线程 Selenium Manager 下载/匹配）
+    driver_downloaded = Signal(str, str)     # (driver_path, error_msg)
     """学习通刷课 主窗口（PySide6 版）"""
     # 模型列表拉取完成信号（跨线程安全）
     models_fetched = Signal(list, str)  # (model_ids, error_msg)
@@ -516,6 +518,49 @@ class StartWindow(QMainWindow):
         self.open_file_button = QPushButton('选择文件')
         self.open_file_button.clicked.connect(self.select_file)
         gl.addWidget(self.open_file_button, 1, 2, Qt.AlignmentFlag.AlignLeft)
+        self.driver_auto_btn = QPushButton('自动下载驱动')
+        self.driver_auto_btn.setToolTip(
+            '联网自动匹配/下载当前浏览器驱动，并填入驱动地址\n'
+            '(新版本驱动由 Selenium Manager 下载，与浏览器主版本自动对齐)')
+        self.driver_auto_btn.clicked.connect(self.auto_download_driver)
+        self.driver_downloaded.connect(self._on_driver_downloaded)
+        gl.addWidget(self.driver_auto_btn, 1, 3, Qt.AlignmentFlag.AlignLeft)
+
+    def auto_download_driver(self):
+        """联网下载/匹配当前浏览器类型的驱动（Selenium Manager）。
+
+        后台线程执行，成功后自动填充到 browser_driver_entry。
+        下载/探测过程中禁用按钮，避免用户重复触发。"""
+        browser = (self.browser_entry.currentText().strip().lower()
+                   or 'edge')
+        self.driver_auto_btn.setEnabled(False)
+        self._append_log(f'正在联网下载/匹配 {browser} 驱动 ...\n')
+
+        def worker():
+            driver_path = ''
+            err = ''
+            try:
+                from selenium.webdriver.common.selenium_manager import \
+                    SeleniumManager
+                result = SeleniumManager().binary_paths(
+                    ['--browser', browser])
+                driver_path = (result or {}).get('driver_path', '')
+                if not driver_path or not os.path.isfile(driver_path):
+                    err = f'Selenium Manager 返回无效路径: {driver_path!r}'
+            except Exception as e:
+                err = f'{e.__class__.__name__}: {e}'
+            self.driver_downloaded.emit(driver_path, err)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_driver_downloaded(self, driver_path, err):
+        self.driver_auto_btn.setEnabled(True)
+        if err:
+            self._append_log(f'自动下载驱动失败: {err}\n')
+            self._append_log('请手动在驱动地址中选择文件，或设置到 PATH\n')
+            return
+        if driver_path:
+            self.browser_driver_entry.setText(driver_path)
+            self._append_log(f'驱动已就绪: {driver_path}\n')
 
         # ---------- 界面设置 ----------
         gl = self.set_group_pages['界面设置'][2]
