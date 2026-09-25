@@ -49,15 +49,32 @@ jobs:
             (Join-Path (Get-Location) 'zhidaoshuake.spec') `
             (Join-Path $src 'zhidaoshuake.spec')
           Set-Location $src
-          python -m PyInstaller "zhidaoshuake.spec" --noconfirm --clean *>&1 |
-            Tee-Object -FilePath pyi-build.log
-          if ($LASTEXITCODE -ne 0) {
+          # native 命令的 stderr 不应被 ErrorActionPreference=Stop 当成终止错误
+          $PSNativeCommandUseErrorActionPreference = $false
+          $ErrorActionPreference = "Continue"
+          & python -m PyInstaller "zhidaoshuake.spec" --noconfirm --clean 2>&1 |
+            Tee-Object -FilePath pyi-build.log | Out-Host
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+              $tail = (Get-Content pyi-build.log -Tail 80 -ErrorAction SilentlyContinue) -join "`n"
               Write-Host "----- PyInstaller 构建失败, 日志尾部 -----"
-              Get-Content pyi-build.log -Tail 80
+              Write-Host $tail
+              # 写入 step summary: 公开仓库里可直接查看失败原因
+              "## PyInstaller 构建失败 (exit $code)`n`n``````text`n$tail`n``````" |
+                Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
               exit 1
           }
           Copy-Item 'dist/zhidaoshuake.exe' "$appRoot/zhidaoshuake.exe" -Force
           Get-Item $appRoot/zhidaoshuake.exe | Select-Object Name, Length
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pyi-build-log
+          path: 知到刷课/autovisor-src/Autovisor-main/wine-build/src/pyi-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
