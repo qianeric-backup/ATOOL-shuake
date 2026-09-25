@@ -427,7 +427,18 @@ async def main(config) -> bool:
                         break
                     await page.wait_for_timeout(1500)
 
-                catalog = await detect_catalog_after_verification(page, page.url)
+                try:
+                    catalog = await detect_catalog_after_verification(page, page.url)
+                except RuntimeError as exc:
+                    # 目录识别失败(链接无效/页面结构变化/加载不完整)不应以
+                    # 顶层"系统出错,请检查后重新启动"收场, 给出可操作提示
+                    logger.warn(f"未能识别课程页目录: {exc}", shift=True)
+                    logger.error(
+                        "课程页可能不是有效的智慧树课程链接, 或页面未加载完整; "
+                        "已停止本轮, 请检查课程链接后重试.", shift=True)
+                    logger.event("课程目录识别失败", 地址=page.url, 原因=str(exc))
+                    run_ok = False
+                    break
                 logger.info(f"检测到 {catalog.name} 课程目录.")
                 logger.context(目录类型=catalog.name)
                 logger.event("课程目录", 类型=catalog.name, 地址=page.url)
