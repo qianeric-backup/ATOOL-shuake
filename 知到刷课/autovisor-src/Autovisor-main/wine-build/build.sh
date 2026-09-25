@@ -32,7 +32,7 @@ rsync -a --exclude='__pycache__' \
       --exclude='.playwright_browsers' --exclude='.pw-browsers' \
       --exclude='deb-build' --exclude='wine-build' \
       --exclude='logs' --exclude='dist' --exclude='build' \
-      --exclude='config.ini' --exclude='data/cookies.json' \
+      --exclude='config.ini' --exclude='configs.ini' --exclude='data/cookies.json' \
       --exclude='*.zip' --exclude='*.deb' --exclude='*.exe' \
       ../ src/
 # 首启空白配置（凭据无所给，构造后用户在 GUI 中填写）
@@ -40,43 +40,19 @@ cp ../config.ini.example src/config.ini.example 2>/dev/null || true
 
 # 3. 依赖安装（幂等；PySide6 必须钉 6.9 —— 6.11+ 缺 icuuc.dll 无法在真机启动）
 #    playwright python wheel 打入 exe；浏览器二进制首次运行在目标机下载
-if ! wine "$PY" -c "import PyInstaller, PySide6, requests, playwright, numpy, cv2" 2>/dev/null; then
+#    pygetwindow/Pillow 是 win32 窗口管理与 PIL 依赖，缺了 exe 启动即 ImportError
+if ! wine "$PY" -c "import PyInstaller, PySide6, requests, playwright, numpy, cv2, pygetwindow, PIL" 2>/dev/null; then
     echo "安装构建依赖到 wine prefix..."
     wine "$PY" -m pip install --upgrade pip -q
     wine "$PY" -m pip install -q \
         "pyinstaller>=6.5" "PySide6==6.9.*" requests playwright \
-        numpy==1.26.4 opencv-python==4.10.0.82
+        numpy==1.26.4 opencv-python==4.10.0.82 pygetwindow "Pillow>=10,<13"
 fi
 
 # 4. PyInstaller spec（onefile GUI 即 qt_gui）— 在 src/ 内构建（相对路径可控）
+#    以仓库内 wine-build/zhidaoshuake.spec 为唯一来源，避免两份 spec 漂移
 cd src
-cat > "zhidaoshuake.spec" <<'SPEC'
-# -*- mode: python ; coding: utf-8 -*-
-from PyInstaller.utils.hooks import collect_data_files
-block_cipher = None
-a = Analysis(['qt_gui.py'],
-             pathex=['.'],
-             binaries=[],
-             datas=[
-                ('resources', 'resources'),
-                ('data/mirrors.json', 'data'),
-                ('config.ini.example', '.'),
-                *collect_data_files('playwright', include_py_files=True),
-             ],
-             hiddenimports=['requests'],
-             hookspath=[],
-             runtime_hooks=[],
-             excludes=['tkinter'],
-             win_no_prefer_redirects=False,
-             win_private_assemblies=False,
-             cipher=block_cipher,
-             noarchive=False)
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
-exe = EXE(pyz, a.scripts, a.binaries, a.zipfiles, a.datas, [],
-          name='zhidaoshuake',
-          console=False,
-          clean_dir=True)
-SPEC
+cp ../zhidaoshuake.spec ./zhidaoshuake.spec
 
 wine "$PY" -m PyInstaller "zhidaoshuake.spec" --noconfirm --clean
 

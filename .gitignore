@@ -71,3 +71,7 @@ venv/
 知到刷课/autovisor-src/Autovisor-main/data/exam_cookies.json
 
 知到刷课/autovisor-src/Autovisor-main/config.ini
+
+# 含登录凭据的旧配置文件（上游遗留名, 绝不入库）
+知到刷课/autovisor-src/Autovisor-main/configs.ini
+知到刷课/autovisor-src/Autovisor-main/data/cookies.json

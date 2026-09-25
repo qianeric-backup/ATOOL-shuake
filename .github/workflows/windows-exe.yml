@@ -23,7 +23,7 @@ jobs:
 
       - name: Install build deps
         run: |
-          pip install -q "pyinstaller>=6.5" "PySide6==6.9.*" requests "playwright>=1.40" "numpy==1.26.4" "opencv-python==4.10.0.82" "pygetwindow==0.0.9"
+          pip install -q "pyinstaller>=6.5" "PySide6==6.9.*" requests "playwright>=1.40" "numpy==1.26.4" "opencv-python==4.10.0.82" "pygetwindow==0.0.9" "Pillow>=10,<13"
 
       - name: Build zhidaoshuake.exe (onefile)
         shell: pwsh
@@ -37,7 +37,7 @@ jobs:
               $_.Name -notin @(
                   'wine-build','deb-build','.playwright_browsers','.pw-browsers',
                   '.runtime_libs','logs','__pycache__','.pytest_cache','.github',
-                  'zhidaoshuake.exe','config.ini','data'
+                  'zhidaoshuake.exe','config.ini','configs.ini','data',
               ) -and $_.Name -notmatch '\.(zip|exe|deb|pyc)$'
           } | ForEach-Object {
               Copy-Item $_.FullName -Destination $src -Recurse -Force
