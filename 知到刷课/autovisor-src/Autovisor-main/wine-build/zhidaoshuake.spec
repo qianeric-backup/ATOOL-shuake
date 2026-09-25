@@ -17,9 +17,9 @@ a = Analysis(['qt_gui.py'],
                 *collect_data_files('playwright', include_py_files=True),
              ],
              # PIL(modules/support.py) 与 pygetwindow(modules/utils.py, win32 分支)
-             # 是条件/延迟导入, 且 Pillow/pygetwindow 未安装时分析会静默跳过,
-             # 导致 exe 启动 ModuleNotFoundError; 显式列入并以 pip 装齐依赖
-             hiddenimports=['requests', 'pygetwindow', 'PIL', 'PIL.Image'],
+             # 是条件/延迟导入; Pillow/pygetwindow 未安装时静态分析会静默跳过,
+             # 导致 exe 启动 ModuleNotFoundError, 故依赖必须在构建环境装齐
+             hiddenimports=['requests', 'pygetwindow'],
              hookspath=[],
              runtime_hooks=[],
              excludes=['tkinter'],

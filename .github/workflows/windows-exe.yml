@@ -56,11 +56,15 @@ jobs:
             Tee-Object -FilePath pyi-build.log | Out-Host
           $code = $LASTEXITCODE
           if ($code -ne 0) {
-              $tail = (Get-Content pyi-build.log -Tail 80 -ErrorAction SilentlyContinue) -join "`n"
+              $tail = (Get-Content pyi-build.log -Tail 60 -ErrorAction SilentlyContinue) -join "`n"
               Write-Host "----- PyInstaller 构建失败, 日志尾部 -----"
               Write-Host $tail
-              # 写入 step summary: 公开仓库里可直接查看失败原因
-              "## PyInstaller 构建失败 (exit $code)`n`n``````text`n$tail`n``````" |
+              # 以 annotation 形式带出日志(公开仓库匿名可读), 单条上限约 64KB
+              $flat = $tail -replace "`r`n", "%0A" -replace "`n", "%0A"
+              if ($flat.Length -gt 60000) { $flat = $flat.Substring($flat.Length - 60000) }
+              Write-Host "::error title=PyInstaller 构建失败 (exit $code)::$flat"
+              # 同时写入 step summary
+              "## PyInstaller 构建失败 (exit $code)`n`n$tail" |
                 Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
               exit 1
           }
