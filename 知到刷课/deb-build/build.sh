@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 构建 Linux deb 安装包（autovisor 知到刷课助手）
+# 构建 Linux deb 安装包（知到刷课助手）
 # 结构：程序（源码 + vendor(PySide6/playwright/requests) + packages(numpy/cv2)
 #       等运行时依赖随包，安装后离线可用）装 /opt；
 #       首启同步到 ~/.local/share/autovisor-zhihuishu（可写数据目录）
@@ -10,7 +10,7 @@ ROOT="$(cd ../autovisor-src/Autovisor-main && pwd)"   # Autovisor-main/
 REPO="$(cd "$ROOT/../../.." && pwd)"       # 仓库根
 SRC="$ROOT"
 VER="3.18.3-1"
-PKG_NAME="autovisor-zhihuishu"
+PKG_NAME="zhidao-shuake"
 PKG="${PKG_NAME}_${VER}_amd64"
 WORK="pkg/$PKG"
 VENDOR="$WORK/opt/$PKG_NAME/vendor"
@@ -187,7 +187,7 @@ Exec=autovisor-zhihuishu
 Icon=autovisor-zhihuishu
 Terminal=false
 Categories=Network;Education;
-StartupWMClass=Autovisor
+StartupWMClass=知到刷课助手
 DESK
 
 # 6) 控制文件与文档
@@ -200,7 +200,7 @@ Architecture: amd64
 Depends: python3 (>= 3.10), python3-requests
 Installed-Size: 600000
 Maintainer: qianeric-backup <qianeric-backup@users.noreply.github.com>
-Description: 知到智慧树自动学习助手 (Autovisor 3.18.3)
+Description: 知到智慧树自动刷课助手 (上游内核 3.18.3)
  视频自动观看与倍速、课中弹题与课程测试 AI 自动作答（OpenAI 兼容接口,
  可配置/刷新模型列表/连通性测试/随时开关）、滑块验证自动或人工、
  课程卡死自恢复、运行诊断命令 (--check-browser/--check-course)。

@@ -20,6 +20,6 @@ a = Analysis(['qt_gui.py'],
              noarchive=False)
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(pyz, a.scripts, a.binaries, a.zipfiles, a.datas, [],
-          name='AutovisorGUI',
+          name='知到刷课助手',
           console=False,
           clean_dir=True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# wine 交叉打包 知到刷课助手（AutovisorCLI/GUI exe），产物 Autovisor-*.exe
+# wine 交叉打包 知到刷课助手.exe（Windows x64）
 # 结构参照 学习通刷课/wine-build/build.sh：
 #   - 构建目录使用 ASCII 路径规避 wine 中文路径问题
 #   - 运行时用户数据（config.ini/cookies 等）绝不打包
@@ -50,7 +50,7 @@ fi
 
 # 4. PyInstaller spec（onefile GUI 即 qt_gui）— 在 src/ 内构建（相对路径可控）
 cd src
-cat > "AutovisorGUI.spec" <<'SPEC'
+cat > "知到刷课助手.spec" <<'SPEC'
 # -*- mode: python ; coding: utf-8 -*-
 block_cipher = None
 a = Analysis(['qt_gui.py'],
@@ -71,14 +71,14 @@ a = Analysis(['qt_gui.py'],
              noarchive=False)
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(pyz, a.scripts, a.binaries, a.zipfiles, a.datas, [],
-          name='AutovisorGUI',
+          name='知到刷课助手',
           console=False,
           clean_dir=True)
 SPEC
 
-wine "$PY" -m PyInstaller "AutovisorGUI.spec" --noconfirm --clean
+wine "$PY" -m PyInstaller "知到刷课助手.spec" --noconfirm --clean
 
 # 5. 产物归档（exe 放 Autovisor-main/ 项目根；构建中间件留在 wine-build/src）
-cp -f dist/AutovisorGUI.exe ../../AutovisorGUI.exe
-ls -la ../../AutovisorGUI.exe
-echo "完成: AutovisorGUI.exe -> ../../AutovisorGUI.exe"
+cp -f 'dist/知到刷课助手.exe' ../../知到刷课助手.exe
+ls -la ../../知到刷课助手.exe
+echo "完成: 知到刷课助手.exe -> ../../知到刷课助手.exe"

@@ -41,6 +41,6 @@ fi
         echo "提示: 首次运行请执行 python3 -m playwright install firefox"
 
 # 5. 启动
-echo "启动 知到刷课（Autovisor） ..."
+echo "启动 知到刷课助手 ..."
 cd "$SRC_DIR"
 python3 qt_gui.py

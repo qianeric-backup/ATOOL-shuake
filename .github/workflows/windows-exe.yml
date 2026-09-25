@@ -1,12 +1,11 @@
-name: 知到 Windows exe 打包（AutovisorGUI）
+name: 知到 Windows exe 打包（知到刷课助手）
 
 on:
   workflow_dispatch: {}
   push:
     tags:
-      - "autovisor-v*"
-      - "知到*"
-
+      - "zhidaoshuake-v*"
+      - "知到v*"
 permissions:
   contents: write
 
@@ -26,22 +25,19 @@ jobs:
         run: |
           pip install -q "pyinstaller>=6.5" "PySide6==6.9.*" requests "playwright>=1.40" "numpy==1.26.4" "opencv-python==4.10.0.82"
 
-      - name: Build AutovisorGUI.exe (onedir→onefile)
+      - name: Build 知到刷课助手.exe (onefile)
         shell: pwsh
-        env:
-          QT_QPA_PLATFORM: offscreen
         working-directory: 知到刷课/autovisor-src/Autovisor-main/wine-build
         run: |
           $ErrorActionPreference = "Stop"
           $appRoot = Resolve-Path ..
           $src = Join-Path (Get-Location) "src"
-          # 同步源码树到 ASCII 工作目录（排除本机运行数据与构建中间件）
           New-Item -ItemType Directory -Force -Path $src | Out-Null
           Get-ChildItem $appRoot -Force | Where-Object {
               $_.Name -notin @(
                   'wine-build','deb-build','.playwright_browsers','.pw-browsers',
                   '.runtime_libs','logs','__pycache__','.pytest_cache','.github',
-                  'AutovisorGUI.exe','config.ini','data'
+                  '知到刷课助手.exe','config.ini','data'
               ) -and $_.Name -notmatch '\.(zip|exe|deb|pyc)$'
           } | ForEach-Object {
               Copy-Item $_.FullName -Destination $src -Recurse -Force
@@ -49,23 +45,23 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Join-Path $src 'data') | Out-Null
           Copy-Item (Join-Path $appRoot 'data/mirrors.json') (Join-Path $src 'data') -Force -ErrorAction SilentlyContinue
           Copy-Item -ErrorAction SilentlyContinue `
-            (Join-Path (Get-Location) 'AutovisorGUI.spec') `
-            (Join-Path $src 'AutovisorGUI.spec')
+            (Join-Path (Get-Location) '知到刷课助手.spec') `
+            (Join-Path $src '知到刷课助手.spec')
           Set-Location $src
-          python -m PyInstaller AutovisorGUI.spec --noconfirm --clean
-          Copy-Item dist/AutovisorGUI.exe $appRoot/AutovisorGUI.exe -Force
-          Get-Item $appRoot/AutovisorGUI.exe | Select-Object Name, Length
+          python -m PyInstaller "知到刷课助手.spec" --noconfirm --clean
+          Copy-Item 'dist/知到刷课助手.exe' "$appRoot/知到刷课助手.exe" -Force
+          Get-Item $appRoot/知到刷课助手.exe | Select-Object Name, Length
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AutovisorGUI.exe
-          path: 知到刷课/autovisor-src/Autovisor-main/AutovisorGUI.exe
+          name: 知到刷课助手.exe
+          path: 知到刷课/autovisor-src/Autovisor-main/知到刷课助手.exe
           retention-days: 14
 
       - name: Release (tag push only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: 知到刷课/autovisor-src/Autovisor-main/AutovisorGUI.exe
+          files: 知到刷课/autovisor-src/Autovisor-main/知到刷课助手.exe
           generate_release_notes: true
