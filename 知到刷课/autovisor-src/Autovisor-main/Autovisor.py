@@ -530,7 +530,9 @@ def cli() -> int:
         exit_code = 1
     finally:
         logger.save()
-        if getattr(sys, "frozen", False) and sys.stdin.isatty():
+        # windowed exe(console=False) 下 sys.stdin 为 None, 直接调用 isatty()
+        # 会抛 AttributeError 并被 GUI 线程捕获成"刷课线程异常"
+        if getattr(sys, "frozen", False) and sys.stdin and sys.stdin.isatty():
             try:
                 input("程序已结束,按Enter退出...")
             except EOFError:

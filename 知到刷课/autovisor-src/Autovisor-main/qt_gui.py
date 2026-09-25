@@ -211,7 +211,10 @@ def run_shuake(log_queue: queue.Queue, on_done):
     try:
         Autovisor.cli()
     except Exception as e:  # 兜底, 避免线程静默死亡
-        log_queue.put(f"[GUI] 刷课线程异常: {e}\n")
+        import traceback
+        log_queue.put(f"[GUI] 刷课线程异常: {type(e).__name__}: {e}\n")
+        # 只打印一行异常信息无法定位问题(如曾经的 None.isatty), 这里补堆栈
+        log_queue.put(traceback.format_exc()[-2000:] + "\n")
     finally:
         sys.stdout, sys.stderr = old_stdout, old_stderr
         # 结束回调经队列带回主线程处理（QTimer 轮询 pump_log）,

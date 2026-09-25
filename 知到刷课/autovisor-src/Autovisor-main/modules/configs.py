@@ -63,24 +63,28 @@ class Config:
             )
 
     def _read_mirrors(self, mirrors_path=None) -> dict:
-        if not mirrors_path:
-            # 按候选顺序查找: 配置文件所在目录 → exe 目录 → 打包内置
-            # 资源目录(_MEIPASS, onefile 的 data/ 会解压到这里) → 源码上级目录
-            candidates = []
-            if self.config_path:
-                candidates.append(os.path.join(
-                    os.path.dirname(self.config_path), "data", "mirrors.json"))
-            if getattr(sys, "frozen", False):
-                candidates.append(os.path.join(
-                    os.path.dirname(sys.executable), "data", "mirrors.json"))
-                meipass = getattr(sys, "_MEIPASS", None)
-                if meipass:
-                    candidates.append(os.path.join(meipass, "data", "mirrors.json"))
+        # 候选顺序: 显式传入路径 → 配置文件所在目录 → exe 目录 → 打包内置
+        # 资源目录(_MEIPASS, onefile 的 data/ 解压在这里) → 源码上级目录。
+        # 显式传入的路径不存在时也要继续回退: 打包态调用方传的是
+        # <exe目录>/data/mirrors.json, 而 onefile 的资源实际在 _MEIPASS 内,
+        # 直接报错会让 exe 一点「开始刷课」就 ConfigError 退出。
+        candidates = []
+        if mirrors_path:
+            candidates.append(mirrors_path)
+        if self.config_path:
             candidates.append(os.path.join(
-                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                "data", "mirrors.json"))
-            mirrors_path = next(
-                (p for p in candidates if os.path.isfile(p)), candidates[0])
+                os.path.dirname(self.config_path), "data", "mirrors.json"))
+        if getattr(sys, "frozen", False):
+            candidates.append(os.path.join(
+                os.path.dirname(sys.executable), "data", "mirrors.json"))
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(os.path.join(meipass, "data", "mirrors.json"))
+        candidates.append(os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "data", "mirrors.json"))
+        mirrors_path = next(
+            (p for p in candidates if os.path.isfile(p)), candidates[0])
         if not os.path.isfile(mirrors_path):
             raise ConfigError(f"未找到镜像配置文件: {mirrors_path}")
         try:
@@ -113,9 +117,13 @@ class Config:
         _options = self._config.options("course-url")
         for _option in _options:
             course_url = self._config.get("course-url", _option, raw=True)
+            # 模板里 URL2..URLn 常留空: 空值直接跳过, 不再逐条打印
+            # "不是一个有效网址"(一次刷课会刷屏 6 行, 干扰真正的错误信息)
+            if not course_url or not course_url.strip():
+                continue
             matched = re.findall(self.course_match_rule, course_url)
             if not matched:
-                print(f"\"{course_url.strip()}\"\n不是一个有效网址,将忽略该网址.")
+                print(f'"{course_url.strip()}"\n不是一个有效网址,将忽略该网址.')
                 continue
             course_urls.append(course_url)
         return course_urls
