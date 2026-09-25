@@ -1,4 +1,4 @@
-name: 知到 Windows exe 打包（知到刷课助手）
+name: 知到 Windows exe 打包（zhidaoshuake）
 
 on:
   workflow_dispatch: {}
@@ -25,7 +25,7 @@ jobs:
         run: |
           pip install -q "pyinstaller>=6.5" "PySide6==6.9.*" requests "playwright>=1.40" "numpy==1.26.4" "opencv-python==4.10.0.82"
 
-      - name: Build 知到刷课助手.exe (onefile)
+      - name: Build zhidaoshuake.exe (onefile)
         shell: pwsh
         working-directory: 知到刷课/autovisor-src/Autovisor-main/wine-build
         run: |
@@ -37,7 +37,7 @@ jobs:
               $_.Name -notin @(
                   'wine-build','deb-build','.playwright_browsers','.pw-browsers',
                   '.runtime_libs','logs','__pycache__','.pytest_cache','.github',
-                  '知到刷课助手.exe','config.ini','data'
+                  'zhidaoshuake.exe','config.ini','data'
               ) -and $_.Name -notmatch '\.(zip|exe|deb|pyc)$'
           } | ForEach-Object {
               Copy-Item $_.FullName -Destination $src -Recurse -Force
@@ -45,23 +45,23 @@ jobs:
           New-Item -ItemType Directory -Force -Path (Join-Path $src 'data') | Out-Null
           Copy-Item (Join-Path $appRoot 'data/mirrors.json') (Join-Path $src 'data') -Force -ErrorAction SilentlyContinue
           Copy-Item -ErrorAction SilentlyContinue `
-            (Join-Path (Get-Location) '知到刷课助手.spec') `
-            (Join-Path $src '知到刷课助手.spec')
+            (Join-Path (Get-Location) 'zhidaoshuake.spec') `
+            (Join-Path $src 'zhidaoshuake.spec')
           Set-Location $src
-          python -m PyInstaller "知到刷课助手.spec" --noconfirm --clean
-          Copy-Item 'dist/知到刷课助手.exe' "$appRoot/知到刷课助手.exe" -Force
-          Get-Item $appRoot/知到刷课助手.exe | Select-Object Name, Length
+          python -m PyInstaller "zhidaoshuake.spec" --noconfirm --clean
+          Copy-Item 'dist/zhidaoshuake.exe' "$appRoot/zhidaoshuake.exe" -Force
+          Get-Item $appRoot/zhidaoshuake.exe | Select-Object Name, Length
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: 知到刷课助手.exe
-          path: 知到刷课/autovisor-src/Autovisor-main/知到刷课助手.exe
+          path: 知到刷课/autovisor-src/Autovisor-main/zhidaoshuake.exe
           retention-days: 14
 
       - name: Release (tag push only)
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: 知到刷课/autovisor-src/Autovisor-main/知到刷课助手.exe
+          files: 知到刷课/autovisor-src/Autovisor-main/zhidaoshuake.exe
           generate_release_notes: true
