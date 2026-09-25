@@ -27,49 +27,42 @@ jobs:
           python -c "import PIL, pygetwindow, requests, playwright, PySide6; print('deps ok')"
 
       - name: Build zhidaoshuake.exe (onefile)
-        shell: pwsh
+        shell: bash
         working-directory: 知到刷课/autovisor-src/Autovisor-main/wine-build
         run: |
-          $ErrorActionPreference = "Stop"
-          $appRoot = Resolve-Path ..
-          $src = Join-Path (Get-Location) "src"
-          New-Item -ItemType Directory -Force -Path $src | Out-Null
-          Get-ChildItem $appRoot -Force | Where-Object {
-              $_.Name -notin @(
-                  'wine-build','deb-build','.playwright_browsers','.pw-browsers',
-                  '.runtime_libs','logs','__pycache__','.pytest_cache','.github',
-                  'zhidaoshuake.exe','config.ini','configs.ini','data',
-              ) -and $_.Name -notmatch '\.(zip|exe|deb|pyc)$'
-          } | ForEach-Object {
-              Copy-Item $_.FullName -Destination $src -Recurse -Force
-          }
-          New-Item -ItemType Directory -Force -Path (Join-Path $src 'data') | Out-Null
-          Copy-Item (Join-Path $appRoot 'data/mirrors.json') (Join-Path $src 'data') -Force -ErrorAction SilentlyContinue
-          Copy-Item -ErrorAction SilentlyContinue `
-            (Join-Path (Get-Location) 'zhidaoshuake.spec') `
-            (Join-Path $src 'zhidaoshuake.spec')
-          Set-Location $src
-          # native 命令的 stderr 不应被 ErrorActionPreference=Stop 当成终止错误
-          $PSNativeCommandUseErrorActionPreference = $false
-          $ErrorActionPreference = "Continue"
-          & python -m PyInstaller "zhidaoshuake.spec" --noconfirm --clean 2>&1 |
-            Tee-Object -FilePath pyi-build.log | Out-Host
-          $code = $LASTEXITCODE
-          if ($code -ne 0) {
-              $tail = (Get-Content pyi-build.log -Tail 60 -ErrorAction SilentlyContinue) -join "`n"
-              Write-Host "----- PyInstaller 构建失败, 日志尾部 -----"
-              Write-Host $tail
-              # 以 annotation 形式带出日志(公开仓库匿名可读), 单条上限约 64KB
-              $flat = $tail -replace "`r`n", "%0A" -replace "`n", "%0A"
-              if ($flat.Length -gt 60000) { $flat = $flat.Substring($flat.Length - 60000) }
-              Write-Host "::error title=PyInstaller 构建失败 (exit $code)::$flat"
-              # 同时写入 step summary
-              "## PyInstaller 构建失败 (exit $code)`n`n$tail" |
-                Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
-              exit 1
-          }
-          Copy-Item 'dist/zhidaoshuake.exe' "$appRoot/zhidaoshuake.exe" -Force
-          Get-Item $appRoot/zhidaoshuake.exe | Select-Object Name, Length
+          set -uo pipefail
+          appRoot="$(cd .. && pwd)"
+          src="$(pwd)/src"
+          rm -rf "$src"
+          mkdir -p "$src"
+          # 复制源码（排除构建产物与运行时用户数据）
+          shopt -s dotglob nullglob
+          for f in "$appRoot"/*; do
+            name="$(basename "$f")"
+            case "$name" in
+              wine-build|deb-build|.playwright_browsers|.pw-browsers|.runtime_libs|logs|__pycache__|.pytest_cache|.github|zhidaoshuake.exe|config.ini|configs.ini|data) continue ;;
+            esac
+            case "$name" in *.zip|*.exe|*.deb|*.pyc) continue ;; esac
+            cp -r "$f" "$src/"
+          done
+          mkdir -p "$src/data"
+          cp "$appRoot/data/mirrors.json" "$src/data/" 2>/dev/null || true
+          cp "zhidaoshuake.spec" "$src/zhidaoshuake.spec"
+          cd "$src"
+          echo "::group::PyInstaller 构建"
+          python -m PyInstaller "zhidaoshuake.spec" --noconfirm --clean 2>&1 | tee pyi-build.log
+          code="${PIPESTATUS[0]}"
+          echo "::endgroup::"
+          if [ "$code" -ne 0 ]; then
+            echo "PyInstaller 退出码: $code"
+            tail -n 40 pyi-build.log | sed 's/^/  /'
+            msg="$(tail -n 20 pyi-build.log | tr '\n' '~' | cut -c1-4000)"
+            echo "::error title=PyInstaller 构建失败 (exit $code)::$msg"
+            exit 1
+          fi
+          ls -l dist/
+          cp dist/zhidaoshuake.exe "$appRoot/zhidaoshuake.exe"
+          ls -l "$appRoot/zhidaoshuake.exe"
 
       - name: Upload build log (always)
         if: always()
