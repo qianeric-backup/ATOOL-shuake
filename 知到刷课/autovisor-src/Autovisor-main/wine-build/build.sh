@@ -52,6 +52,7 @@ fi
 cd src
 cat > "zhidaoshuake.spec" <<'SPEC'
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files
 block_cipher = None
 a = Analysis(['qt_gui.py'],
              pathex=['.'],
@@ -60,6 +61,7 @@ a = Analysis(['qt_gui.py'],
                 ('resources', 'resources'),
                 ('data/mirrors.json', 'data'),
                 ('config.ini.example', '.'),
+                *collect_data_files('playwright', include_py_files=True),
              ],
              hiddenimports=['requests'],
              hookspath=[],

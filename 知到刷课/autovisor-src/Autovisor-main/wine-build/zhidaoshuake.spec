@@ -9,6 +9,10 @@ a = Analysis(['qt_gui.py'],
                 ('resources', 'resources'),
                 ('data/mirrors.json', 'data'),
                 ('config.ini.example', '.'),
+                # playwright 自带的 node/js driver 二进制需要连包散发给 exe
+                # （Windows 上 Edge/Chrome 走 channel 直接访问系统浏览器编译），
+                # 否则 exe 单独跑会报 playwright 未就绪
+                *collect_data_files('playwright', include_py_files=True),
              ],
              hiddenimports=['requests'],
              hookspath=[],
