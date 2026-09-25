@@ -354,6 +354,11 @@ async def main(config) -> bool:
         modules = installer.start(config)
         logger.info("所有依赖库安装完成!")
 
+    # 自动做题(平时测试)所需的 AI 配置与"答完自动提交"开关, 供 watch_exam_pages
+    # 与 run_course 的测试任务点处理共用
+    exam_ai_cfg = None
+    exam_submit = bool(getattr(config, "doExamSubmit", False))
+
     logger.section("登录")
     async with async_playwright() as p:
         cookies = load_cookies(COOKIE_PATH)
@@ -380,13 +385,16 @@ async def main(config) -> bool:
                 try:
                     import modules.ai_client as ai_client
                     import modules.exam_integrate as exam_integrate
-                    ai_cfg = ai_client.load_ai_config()
+                    exam_ai_cfg = ai_client.load_ai_config()
                     tasks.append(asyncio.create_task(
                         exam_integrate.watch_exam_pages(
-                            context, ai_cfg=ai_cfg,
-                            submit=getattr(config, "doExamSubmit", False))))
-                    logger.event("自动做题", 状态="已启动",
-                                 弹窗来源="课程页【平时测试】")
+                            context, ai_cfg=exam_ai_cfg, submit=exam_submit)))
+                    logger.event(
+                        "自动做题", 状态="已启动",
+                        弹窗来源="课程页【平时测试】",
+                        AI配置="完整" if ai_client.is_configured(exam_ai_cfg) else "不完整",
+                        答完自动提交=exam_submit,
+                    )
                 except Exception as exc:
                     logger.warn(f"自动做题任务启动失败: {exc}")
             logger.event(
@@ -458,7 +466,8 @@ async def main(config) -> bool:
 
                 playback_enabled.clear()
                 outcome = await run_course(
-                    page, catalog, config, logger, playback_enabled
+                    page, catalog, config, logger, playback_enabled,
+                    ai_cfg=exam_ai_cfg, exam_submit=exam_submit,
                 )
                 playback_enabled.clear()
                 logger.event("课程结果", 结果=outcome.value, 目录类型=catalog.name)

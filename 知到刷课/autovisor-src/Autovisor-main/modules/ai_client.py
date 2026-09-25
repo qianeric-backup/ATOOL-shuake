@@ -14,9 +14,35 @@ import configparser
 import json
 import os
 import re
+import sys
+
 import requests
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+def runtime_base_dir():
+    """运行根目录: 打包(exe)时为 exe 所在目录, 源码态为项目目录。
+
+    frozen(onefile) 下 __file__ 位于 _MEIPASS 临时解包目录, 直接由它推导
+    会读不到用户放在 exe 旁的 config.ini —— 表现为 GUI 里 AI 配置已填好、
+    连通性测试通过, 但刷课主流程仍报"AI 配置缺失", 课中题/平时测试都不作答。
+    """
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def config_candidates():
+    """config.ini 候选路径(优先级): 运行目录 → 打包内置(_MEIPASS) → 源码目录"""
+    candidates = [os.path.join(runtime_base_dir(), "config.ini")]
+    meipass = getattr(sys, "_MEIPASS", None)
+    if meipass:
+        candidates.append(os.path.join(meipass, "config.ini"))
+    candidates.append(os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.ini"))
+    return candidates
+
+
+BASE_DIR = runtime_base_dir()
 DEFAULT_CONFIG_FILE = os.path.join(BASE_DIR, "config.ini")
 REQ_TIMEOUT_MODELS = 15
 REQ_TIMEOUT_ASK = 60
@@ -137,14 +163,19 @@ def _anthropic_list_models(api_url, api_key, timeout=REQ_TIMEOUT_MODELS):
 
 
 def load_ai_config(config_path=None):
-    """从 config.ini 读取 [ai-option]; 不存在时返回默认配置."""
-    path = config_path or DEFAULT_CONFIG_FILE
+    """从 config.ini 读取 [ai-option]; 不存在时返回默认配置。
+
+    未显式指定路径时按 config_candidates() 依次尝试(运行目录 → 打包内置
+    → 源码目录), 兼容 exe 单文件分发时 exe 旁才有配置的情况。
+    """
+    paths = [config_path] if config_path else config_candidates()
     cfg = configparser.ConfigParser()
-    try:
-        if not cfg.read(path, encoding="utf-8-sig"):
-            cfg.read(path, encoding="gbk")
-    except Exception:
-        pass
+    for path in paths:
+        try:
+            if cfg.read(path, encoding="utf-8-sig") or cfg.read(path, encoding="gbk"):
+                break
+        except Exception:
+            continue
 
     def get(option, default=""):
         try:

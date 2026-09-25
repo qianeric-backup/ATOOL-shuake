@@ -166,7 +166,7 @@ def load_form_values(cfg: configparser.ConfigParser):
 def save_form_values(cfg: configparser.ConfigParser, driver, course_url, username, password,
                      limit_time, speed, auto_captcha, hide_window, mute,
                      ai_url="", ai_key="", ai_model="", ai_enable=True,
-                     bg_keep=True, auto_exam=False) -> None:
+                     bg_keep=True, auto_exam=False, auto_exam_submit=False) -> None:
     cfg.set("browser-option", "driver", driver)
     cfg.set("course-url", "URL1", course_url)
     cfg.set("user-account", "username", username)
@@ -178,6 +178,8 @@ def save_form_values(cfg: configparser.ConfigParser, driver, course_url, usernam
     cfg.set("course-option", "soundOff", str(mute))
     cfg.set("browser-option", "keepWindowActive", str(bool(bg_keep)))
     cfg.set("script-option", "enableAutoExam", str(bool(auto_exam)))
+    # 主流程自动做题的"答完自动提交"开关(GUI 的做题链接勾选框共用)
+    cfg.set("script-option", "enableAutoExamSubmit", str(bool(auto_exam_submit)))
     if not cfg.has_section("ai-option"):
         cfg.add_section("ai-option")
     cfg.set("ai-option", "api_url", ai_url)
@@ -402,6 +404,10 @@ class MainWindow(QWidget):
         self.mute_check.setChecked(mute)
         self.bg_keep_check.setChecked(bg_keep)
         self.auto_exam_check.setChecked(auto_exam)
+        # 「答完自动提交」开关(主流程自动做题用): 直接读 script-option
+        self.exam_submit_check.setChecked(
+            config.get("script-option", "enableAutoExamSubmit", fallback="False")
+            .strip().lower() == "true")
         self.ai_url_edit.setText(ai_url)
         self.ai_key_edit.setText(ai_key)
         self.ai_model_combo.setCurrentText(ai_model)
@@ -561,7 +567,8 @@ class MainWindow(QWidget):
                              self.ai_model_combo.currentText().strip(),
                              self.ai_auto_check.isChecked(),
                              self.bg_keep_check.isChecked(),
-                             self.auto_exam_check.isChecked())
+                             self.auto_exam_check.isChecked(),
+                             self.exam_submit_check.isChecked())
         except Exception as e:
             QMessageBox.critical(self, "保存失败", f"写入 config.ini 失败:\n{e}")
             return
@@ -604,7 +611,8 @@ class MainWindow(QWidget):
                              self.ai_model_combo.currentText().strip(),
                              self.ai_auto_check.isChecked(),
                              self.bg_keep_check.isChecked(),
-                             self.auto_exam_check.isChecked())
+                             self.auto_exam_check.isChecked(),
+                             self.exam_submit_check.isChecked())
         except Exception:
             pass
 

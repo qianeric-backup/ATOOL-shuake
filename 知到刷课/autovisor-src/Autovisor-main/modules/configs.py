@@ -30,6 +30,9 @@ class Config:
             self.showDonateCode = self.get_bool_field("script-option", "showDonateCode")
             # 自动做题(平时测试): 刷课弹出做题页时自动 AI 作答
             self.doExam = self.get_bool_field('script-option', 'enableAutoExam', fallback=False)
+            # 自动做题答完后是否自动提交(默认只暂存, 不提交)
+            self.doExamSubmit = self.get_bool_field(
+                'script-option', 'enableAutoExamSubmit', fallback=False)
             # 浏览器额外行为
             self.keepWindowActive = self.get_bool_field(
                 'browser-option', 'keepWindowActive', fallback=True)

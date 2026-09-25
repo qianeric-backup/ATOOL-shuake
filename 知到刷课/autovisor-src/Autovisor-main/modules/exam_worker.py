@@ -19,6 +19,7 @@
 import asyncio
 import json
 import re
+import sys
 from pathlib import Path
 
 import modules.ai_client as ai_client
@@ -26,7 +27,38 @@ from modules.logger import Logger
 
 logger = Logger()
 
-BASE = Path(__file__).resolve().parent.parent
+
+def _runtime_base_dir() -> Path:
+    """运行根目录: 打包(exe)时为 exe 所在目录, 源码态为项目目录。
+
+    frozen 下 __file__ 在 _MEIPASS 内, 用它推导会把可写数据(登录凭证)
+    指到临时目录, 导致自动做题永远拿不到 CAS 凭据。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent.parent
+
+
+BASE = _runtime_base_dir()
+
+
+def data_path(name: str) -> Path:
+    """data/ 下的运行时数据路径(每次调用时解析, 不随导入时机冻结)。"""
+    return _runtime_base_dir() / "data" / name
+
+
+def course_cookie_file() -> Path:
+    """刷课流程保存的登录凭证(含 CASTGC / jt-cas), 自动做题优先用它。"""
+    return data_path("cookies.json")
+
+
+def cas_cookie_file() -> Path:
+    """兼容旧用法: 手工导出的 cookie 文件。"""
+    return data_path("exam_cookies.json")
+
+
+# 兼容旧引用的模块级常量(源码态=项目目录; 运行时请用上面的函数)
+COURSE_COOKIE_FILE = BASE / "data" / "cookies.json"
 CAS_COOKIE_FILE = BASE / "data" / "exam_cookies.json"
 DEFAULT_UA = ("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36")
@@ -39,18 +71,41 @@ def _clean(text) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
 
 
+def _load_cookie_file(path: Path, cas: dict) -> int:
+    """把 cookie 文件(Playwright 导出格式)读进 cas, 返回读入条数。"""
+    if not path.is_file():
+        return 0
+    count = 0
+    try:
+        for item in json.loads(path.read_text(encoding="utf-8")):
+            name = str(item.get("name") or "").strip()
+            value = item.get("value")
+            if name and value not in (None, ""):
+                cas.setdefault(name, str(value))
+                count += 1
+    except Exception:
+        return 0
+    return count
+
+
 def sso_cookies(extra=None) -> dict:
-    """CAS gologin 换考试网关会话, 返回 {name:{value,domain,path}}."""
+    """CAS gologin 换考试网关会话, 返回 {name:{value,domain,path}}.
+
+    凭据来源(按优先级):
+      1. 刷课流程保存的 data/cookies.json —— 正常刷课登录后自动就有;
+      2. 手工导出的 data/exam_cookies.json(兼容旧用法);
+      3. 环境变量 ZHS_COOKIE_STR。
+    """
     import os
+
     import requests
 
     cas = {}
-    if CAS_COOKIE_FILE.is_file():
-        try:
-            for c in json.loads(CAS_COOKIE_FILE.read_text(encoding="utf-8")):
-                cas.setdefault(c["name"], c["value"])
-        except Exception:
-            pass
+    for path in (course_cookie_file(), cas_cookie_file()):
+        loaded = _load_cookie_file(path, cas)
+        if loaded and (cas.get("CASTGC") or cas.get("jt-cas")):
+            logger.debug(f"自动做题凭据来源: {path} ({loaded} 条)")
+            break
     env = os.environ.get("ZHS_COOKIE_STR")
     if env:
         for kv in env.split(";"):
@@ -61,8 +116,9 @@ def sso_cookies(extra=None) -> dict:
         cas.update(extra)
     if not (cas.get("CASTGC") or cas.get("jt-cas")):
         raise RuntimeError(
-            f"缺少 CAS 登录凭据: 请把浏览器最新登录 cookie 存入 {CAS_COOKIE_FILE} "
-            "(或设置环境变量 ZHS_COOKIE_STR)")
+            "缺少 CAS 登录凭据: 请先正常刷课登录一次(程序会把登录凭证保存到 "
+            f"{course_cookie_file()}), 或手工导出 cookie 到 {cas_cookie_file()} "
+            "（也可设置环境变量 ZHS_COOKIE_STR）")
 
     s = requests.Session()
     s.headers.update({"User-Agent": DEFAULT_UA})

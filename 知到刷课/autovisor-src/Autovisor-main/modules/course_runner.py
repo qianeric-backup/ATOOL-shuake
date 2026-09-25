@@ -52,6 +52,8 @@ async def run_course(
     config,
     logger,
     playback_enabled,
+    ai_cfg=None,
+    exam_submit=False,
 ) -> CourseOutcome:
     await page.wait_for_selector(
         catalog.item, state="attached", timeout=CATALOG_ATTACH_TIMEOUT_MS
@@ -70,15 +72,43 @@ async def run_course(
         本轮课时=len(lessons),
     )
     if not lessons:
+        # 目录里可能只有「平时测试」这类非视频任务点: 先尝试自动做完再判定失败
+        try:
+            from modules.exam_navigation import enter_pending_tests
+
+            handled = await enter_pending_tests(
+                page, catalog, config, logger,
+                ai_cfg=ai_cfg, submit=exam_submit,
+            )
+            if handled:
+                logger.event("本次自动完成测试任务点", 数量=handled)
+                logger.event("课程结果", 结果="仅测试任务点, 已处理")
+                return CourseOutcome.COMPLETED
+        except Exception as exc:
+            logger.warn(f"处理测试任务点异常: {exc}", shift=True)
         logger.error("课程目录中没有可播放的视频课时.")
         logger.event("课程结果", 结果="无可用课时")
         return CourseOutcome.FAILED
 
     start_time = time.time()
     paused_time = 0.0
+    # 已尝试过的测试任务点标题: 跨课时累计, 避免反复点击同一条目
+    tried_tests = set()
     for index, lesson in enumerate(lessons):
         position = f"{index + 1}/{len(lessons)}"
         playback_enabled.clear()
+        # 学习本课时前, 先处理目录里"平时测试"等非视频任务点(默认关闭时不动作)
+        try:
+            from modules.exam_navigation import enter_pending_tests
+
+            handled = await enter_pending_tests(
+                page, catalog, config, logger,
+                ai_cfg=ai_cfg, submit=exam_submit, tried=tried_tests,
+            )
+            if handled:
+                logger.event("本次自动完成测试任务点", 数量=handled)
+        except Exception as exc:
+            logger.warn(f"处理测试任务点异常(不影响视频刷课): {exc}", shift=True)
         await lesson.click(timeout=LESSON_CLICK_TIMEOUT_MS)
         active = await wait_for_lesson_active(lesson, catalog)
         if not active:

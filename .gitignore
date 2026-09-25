@@ -77,3 +77,6 @@ venv/
 知到刷课/autovisor-src/Autovisor-main/config.ini
 知到刷课/autovisor-src/Autovisor-main/data/cookies.json
 知到刷课/autovisor-src/Autovisor-main/data/exam_cookies.json
+
+# 依赖安装器临时下载的 wheel（应下载到 packages/，此处兜底忽略）
+*.whl

@@ -16,6 +16,13 @@ enableAutoCaptcha = True
 enableHideWindow = False
 ;是否展示赞赏码(默认:True)
 showDonateCode = True
+;平时测试自动做题: 刷课中自动进入【平时测试/章节测试】并 AI 作答(默认:False)
+;需在 GUI 里填好 AI 配置(api_url/api_key/ai_id), 否则不会作答
+enableAutoExam = False
+;自动做题答完后是否自动提交(默认:False, 只暂存答案不提交)
+enableAutoExamSubmit = False
+;浏览器是否保持前台(防最小化暂停, 默认:True)
+keepWindowActive = True
 
 [course-option]
 ;限制每门课程刷课时长/min (不限制:0)

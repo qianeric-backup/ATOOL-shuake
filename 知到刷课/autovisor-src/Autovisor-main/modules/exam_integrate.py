@@ -25,6 +25,7 @@ def _ai_ready(cfg) -> bool:
 async def _handle_new_page(page, ai_cfg, submit) -> None:
     try:
         # 等新页 URL 稳定(stuExamWeb 弹窗会先占位再跳到 dohomework)
+        # 注意单位为秒: 这里必须短轮询, 写成 300 会让每题最长等 5 分钟
         for _ in range(15):
             url = ""
             try:
@@ -35,7 +36,7 @@ async def _handle_new_page(page, ai_cfg, submit) -> None:
                 break
             if "stuExamWeb" not in url and "onlineexamh5new" not in url:
                 return
-            await asyncio.sleep(300)
+            await asyncio.sleep(0.3)
     except Exception:
         return
     logger.event("平时测试已弹出, 进入自动做题", 地址=page.url[:120])
