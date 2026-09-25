@@ -60,9 +60,48 @@ GUI_DONE = "__GUI_TASK_DONE__"
 CONFIG_FILE = os.path.join(_base_dir(), "config.ini")  # 上游配置名 config.ini
 
 
-# Windows exe 首启适配: config.ini 缺失时从内置 config.ini.example 自动生成,
-# 避免直接弹 ConfigError("未找到配置文件") 退出（packaged onefile 已把
-# config.ini.example 随包内置; 源码态同目录也有该模板）。
+# 首启空白配置模板（与 config.ini.example 等价的代码内置兜底：
+# onefile 打包形态下外部模板可能不可达，用内置字符串保证一定能生成）
+_CONFIG_TEMPLATE = """[user-account]
+;配置账号密码，留空则打开网页后需手动登录
+username =
+password =
+
+[browser-option]
+;配置浏览器,可选 Edge 或 Chrome
+driver = Edge
+;指定浏览器所在路径,不填则使用默认路径
+EXE_PATH =
+;防最小化暂停(默认:True)
+keepWindowActive = True
+
+[script-option]
+;是否自动过登录时的滑块验证(默认:True)
+enableAutoCaptcha = True
+;是否自动隐藏浏览器窗口(默认:False)
+enableHideWindow = False
+;是否展示赞赏码(默认:True)
+showDonateCode = True
+;平时测试自动做题(需配置 [ai-option])
+enableAutoExam = False
+
+[course-option]
+;限制每门课程刷课时长/min (不限制:0)
+limitMaxTime = 30
+;限定播放倍速 (最高:1.8)
+limitSpeed = 1.0
+;设置是否静音播放 (默认:True)
+soundOff = True
+
+[course-url]
+;配置要学习的课程链接,支持(智慧)共享课
+URL1 =
+"""
+
+# Windows exe 首启适配: config.ini 缺失时自动生成空白模板,
+# 避免直接弹 ConfigError("未找到配置文件") 退出, 或空配置下
+# 点开始刷课报 NoSectionError。优先用随包内置的 config.ini.example,
+# 拿不到时回退到上面的代码内置模板。
 def ensure_config_file() -> None:
     if os.path.isfile(CONFIG_FILE):
         return
@@ -70,14 +109,16 @@ def ensure_config_file() -> None:
     # 源码态与 _base_dir 同目录
     example = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "config.ini.example")
-    if os.path.isfile(example):
-        try:
+    try:
+        if os.path.isfile(example):
             with open(example, "r", encoding="utf-8-sig") as f:
                 content = f.read()
-            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-                f.write(content)
-        except OSError:
-            pass  # 生成失败时交由 Autovisor.cli 报原有的 ConfigError
+        else:
+            content = _CONFIG_TEMPLATE
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            f.write(content)
+    except OSError:
+        pass  # 生成失败时交由 Autovisor.cli 报原有的 ConfigError
 
 
 def read_config() -> configparser.ConfigParser:
