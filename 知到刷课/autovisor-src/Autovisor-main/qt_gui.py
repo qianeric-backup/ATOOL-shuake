@@ -28,6 +28,12 @@ from PySide6.QtGui import QFont
 import os
 
 def _base_dir():
+    """运行根目录：打包(onefile/onedir)时为 exe 所在目录，源码态为文件目录。
+
+    onefile 下 __file__ 位于 _MEIPASS 临时解包目录，config.ini/logs 等
+    用户数据必须写到 exe 同目录才能在重启后保留。"""
+    if getattr(sys, "frozen", False):
+        return os.path.dirname(os.path.abspath(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
 
 
@@ -54,7 +60,28 @@ GUI_DONE = "__GUI_TASK_DONE__"
 CONFIG_FILE = os.path.join(_base_dir(), "config.ini")  # 上游配置名 config.ini
 
 
+# Windows exe 首启适配: config.ini 缺失时从内置 config.ini.example 自动生成,
+# 避免直接弹 ConfigError("未找到配置文件") 退出（packaged onefile 已把
+# config.ini.example 随包内置; 源码态同目录也有该模板）。
+def ensure_config_file() -> None:
+    if os.path.isfile(CONFIG_FILE):
+        return
+    # 模板随包内置: frozen(onefile) 时位于 _MEIPASS(__file__ 所在目录),
+    # 源码态与 _base_dir 同目录
+    example = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "config.ini.example")
+    if os.path.isfile(example):
+        try:
+            with open(example, "r", encoding="utf-8-sig") as f:
+                content = f.read()
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                f.write(content)
+        except OSError:
+            pass  # 生成失败时交由 Autovisor.cli 报原有的 ConfigError
+
+
 def read_config() -> configparser.ConfigParser:
+    ensure_config_file()
     cfg = configparser.ConfigParser()
     # utf-8-sig 同时兼容带/不带 BOM 的写法
     try:
@@ -136,6 +163,7 @@ class QueueWriter(io.StringIO):
 
 def run_shuake(log_queue: queue.Queue, on_done):
     """在后台线程运行刷课主流程, 日志重定向到队列。"""
+    ensure_config_file()
     old_stdout, old_stderr = sys.stdout, sys.stderr
     sys.stdout = QueueWriter(log_queue)
     sys.stderr = QueueWriter(log_queue)
@@ -564,6 +592,7 @@ class MainWindow(QWidget):
 
 
 def main():
+    ensure_config_file()
     app = QApplication(sys.argv)
     app.setApplicationName("Autovisor")
     try:

@@ -525,6 +525,8 @@ class StartWindow(QMainWindow):
         self.driver_auto_btn.clicked.connect(self.auto_download_driver)
         self.driver_downloaded.connect(self._on_driver_downloaded)
         gl.addWidget(self.driver_auto_btn, 1, 3, Qt.AlignmentFlag.AlignLeft)
+        # 其余分组面板（界面/账号/功能/高级）同属设置页构建，必须同步完成
+        self._build_set_panels()
 
     def auto_download_driver(self):
         """联网下载/匹配当前浏览器类型的驱动（Selenium Manager）。
@@ -562,6 +564,13 @@ class StartWindow(QMainWindow):
             self.browser_driver_entry.setText(driver_path)
             self._append_log(f'驱动已就绪: {driver_path}\n')
 
+    def _build_set_panels(self):
+        """构建设置页除「配置设置」外的其余分组面板。
+
+        注意：这段 UI 构建必须在主窗口初始化时同步执行；此前它被误缩进
+        在 _on_driver_downloaded 回调内部，导致只有点了「自动下载驱动」
+        且下载成功后这些控件才存在——正常启动直接 AttributeError 崩溃。
+        """
         # ---------- 界面设置 ----------
         gl = self.set_group_pages['界面设置'][2]
         gl.setColumnMinimumWidth(0, 96)

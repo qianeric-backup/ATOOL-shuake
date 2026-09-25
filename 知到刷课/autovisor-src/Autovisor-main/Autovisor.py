@@ -170,7 +170,12 @@ async def init_page(p: Playwright, config, cookies) -> tuple[Page, BrowserContex
     page = await context.new_page()
     logger.debug(f"{config.driver}浏览器启动完成.")
     # 抹去特征
-    with open(get_runtime_path("resources", "stealth.min.js"), 'r') as f:
+    # stealth.min.js 随包内置: onefile 下位于 _MEIPASS/resources,
+    # onedir/源码态位于 exe/脚本目录的 resources/
+    stealth_path = os.path.join(
+        getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))),
+        "resources", "stealth.min.js")
+    with open(stealth_path, 'r') as f:
         js = f.read()
     await page.add_init_script(js)
     logger.debug("stealth.js执行完成.")

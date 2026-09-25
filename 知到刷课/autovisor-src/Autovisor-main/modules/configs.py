@@ -64,13 +64,23 @@ class Config:
 
     def _read_mirrors(self, mirrors_path=None) -> dict:
         if not mirrors_path:
+            # 按候选顺序查找: 配置文件所在目录 → exe 目录 → 打包内置
+            # 资源目录(_MEIPASS, onefile 的 data/ 会解压到这里) → 源码上级目录
+            candidates = []
             if self.config_path:
-                base_dir = os.path.dirname(self.config_path)
-            elif getattr(sys, "frozen", False):
-                base_dir = os.path.dirname(sys.executable)
-            else:
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            mirrors_path = os.path.join(base_dir, "data", "mirrors.json")
+                candidates.append(os.path.join(
+                    os.path.dirname(self.config_path), "data", "mirrors.json"))
+            if getattr(sys, "frozen", False):
+                candidates.append(os.path.join(
+                    os.path.dirname(sys.executable), "data", "mirrors.json"))
+                meipass = getattr(sys, "_MEIPASS", None)
+                if meipass:
+                    candidates.append(os.path.join(meipass, "data", "mirrors.json"))
+            candidates.append(os.path.join(
+                os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                "data", "mirrors.json"))
+            mirrors_path = next(
+                (p for p in candidates if os.path.isfile(p)), candidates[0])
         if not os.path.isfile(mirrors_path):
             raise ConfigError(f"未找到镜像配置文件: {mirrors_path}")
         try:
