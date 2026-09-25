@@ -193,14 +193,14 @@ def run_doexam(log_queue: queue.Queue, on_done, exam_url, engine="firefox",
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Autovisor - 智慧树刷课助手")
+        self.setWindowTitle("知到刷课助手")
         self.setMinimumSize(600, 520)
         self._running = False
         self._exam_running = False
         self._log_queue = queue.Queue()
 
         # 顶部标题
-        title = QLabel("Autovisor 智慧树刷课助手")
+        title = QLabel("知到刷课助手")
         title.setAlignment(Qt.AlignCenter)
         f = QFont("Microsoft YaHei", 16, QFont.Bold)
         title.setFont(f)

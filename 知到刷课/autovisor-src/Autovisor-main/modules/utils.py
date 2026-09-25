@@ -166,7 +166,7 @@ async def hide_window(page: Page) -> None:
 async def get_browser_window(page: Page) -> object | None:
     if sys.platform != "win32":
         return None
-    custom_title = "Autovisor - Playwright"
+    custom_title = "知到刷课助手 - Playwright"
     await page.wait_for_load_state("domcontentloaded")
     await page.evaluate(f'document.title = "{custom_title}"')
     # 获取所有窗口并尝试匹配 Playwright 窗口

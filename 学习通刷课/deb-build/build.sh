@@ -97,7 +97,7 @@ PYEOF
 
 cat > "$WORK/usr/bin/xuexitong-shuake" <<'SHEOF'
 #!/usr/bin/env bash
-# 学习通刷课（学习助手）Linux 启动器
+# 学习通刷课 Linux 启动器
 APP_ROOT="${XUEXITONG_HOME:-$HOME/.local/share/xuexitong-shuake}"
 python3 /opt/xuexitong-shuake/sync_data.py "$APP_ROOT" || exit 1
 cd "$APP_ROOT/shuake_src" || exit 1
@@ -120,13 +120,13 @@ PYEOF
 cat > "$WORK/usr/share/applications/xuexitong-shuake.desktop" <<'DESK'
 [Desktop Entry]
 Type=Application
-Name=学习助手
+Name=学习通刷课助手
 Comment=学习通课程自动学习助手（章节/作业/考试）
 Exec=xuexitong-shuake
 Icon=xuexitong-shuake
 Terminal=false
 Categories=Network;Education;
-StartupWMClass=学习助手
+StartupWMClass=学习通刷课助手
 DESK
 
 # 4) 控制文件与文档
@@ -139,7 +139,7 @@ Architecture: amd64
 Depends: python3 (>= 3.10)
 Installed-Size: 61440
 Maintainer: qianeric-backup <qianeric-backup@users.noreply.github.com>
-Description: 学习通自动学习助手（学习助手）
+Description: 学习通自动学习助手 (Qt 精简版)
  章节视频/文档自动学习、测验与作业/考试自动作答、AI 智能答题
  （任意 OpenAI 兼容接口）、字体解密防乱码、无头静默模式、
  uXueScript 注入模式。Python 依赖随包内置，安装后离线可用。

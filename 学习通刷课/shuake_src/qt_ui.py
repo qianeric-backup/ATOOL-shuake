@@ -286,7 +286,7 @@ class StartWindow(QMainWindow):
         self.version = version
 
     def _setup_window(self):
-        self.setWindowTitle(f'学习助手 {self.version}'.strip())
+        self.setWindowTitle(f'学习通刷课助手 {self.version}'.strip())
         self.resize(880, 660)
         screen = QApplication.primaryScreen()
         geo = screen.availableGeometry()
@@ -431,7 +431,7 @@ class StartWindow(QMainWindow):
 
         self.text_box = QTextEdit()
         self.text_box.setReadOnly(True)
-        self.text_box.append('WELCOME TO 学习助手 ！！！\n请先进入设置页面填写信息！！！')
+        self.text_box.append('WELCOME TO 学习通刷课助手 ！！！\n请先进入设置页面填写信息！！！')
         grid.addWidget(self.text_box, 1, 0, 1, 3)
 
     # ---------------------------------------------------------------- 设置页
@@ -2111,7 +2111,7 @@ class StartWindow(QMainWindow):
 # ---------------------------------------------------------------- 入口 ----
 def main():
     app = QApplication(sys.argv)
-    app.setApplicationName('学习助手')
+    app.setApplicationName('学习通刷课助手')
     win = StartWindow()
     win.show()
     sys.exit(app.exec())

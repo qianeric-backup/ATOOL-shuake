@@ -1,7 +1,7 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=学习助手
+Name=学习通刷课助手
 GenericName=学习通刷课
 Comment=学习通定时自动刷课（Firefox + geckodriver）
 Exec=/bin/bash /home/qianeric/文档/code_project/ATOOL-shuake-main/学习通刷课/shuake_src/run_local.sh
