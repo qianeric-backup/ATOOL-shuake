@@ -8,22 +8,23 @@ import requests
 
 from modules.version import __version__
 
-REPO = "CXRunfree/Autovisor"
+REPO = "qianeric-backup/ATOOL-shuake"
 LATEST_RELEASE_API = f"https://api.github.com/repos/{REPO}/releases/latest"
 RELEASE_PAGE_URL = f"https://github.com/{REPO}/releases/latest"
 REQUEST_TIMEOUT = 5
 REQUEST_HEADERS = {"Accept": "application/vnd.github+json"}
 
-# 发行包命名形如 Autovisor-3.18.0-windows-amd64.zip
+# 本仓库发行 tag 形如 zhidaoshuake-v26.09.25.9, 资产名为 zhidaoshuake.exe
+# （原先指向上游 CXRunfree/Autovisor, 会把用户引去下载上游包）
 _VERSION_PATTERN = re.compile(r"(\d+)\.(\d+)\.(\d+)")
-_WINDOWS_ASSET_KEYWORD = "windows-amd64"
+_WINDOWS_ASSET_KEYWORD = "zhidaoshuake"
 
 # 只展示 GitHub 官方域名的链接, 避免被中间人替换成其他下载地址
 _TRUSTED_HOSTS = ("github.com", "githubusercontent.com")
 
 
 def parse_version(text):
-    """从 "Autovisor-3.18.0" 之类的文本中提取 (major, minor, patch)。"""
+    """从 "zhidaoshuake-v26.09.25.9" 之类的文本中提取 (major, minor, patch)。"""
     if not text:
         return None
     match = _VERSION_PATTERN.search(str(text))
@@ -84,10 +85,10 @@ def fetch_latest_release(timeout=REQUEST_TIMEOUT, session=None, verify=True):
 
 
 def check_for_update(logger, current_version=__version__, timeout=REQUEST_TIMEOUT, session=None):
-    """查询最新 Release, 对比当前版本并打印结果。
+    """查询本仓库最新 Release, 对比当前版本并打印结果。
 
-    3.18.1 起 tag 使用版本号; 旧版 release 的 tag 是日期(2026/9/15),
-    因此优先解析 tag_name, 失败再回退到 release 名称。
+    tag 命名形如 zhidaoshuake-v26.09.25.9(与 modules/version.py 同源),
+    优先解析 tag_name, 失败再回退到 release 名称。
     部分网络(代理/加速工具)会替换 GitHub 证书且未安装对应根证书, 导致校验失败,
     此时关闭校验重试一次; 版本查询不涉及敏感数据, 但下载链接只展示 GitHub 官方域名。
     检查失败(断网、限流等)只记录 debug 日志, 不影响程序运行。

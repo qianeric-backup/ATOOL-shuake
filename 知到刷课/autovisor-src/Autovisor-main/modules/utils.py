@@ -41,9 +41,14 @@ def get_runtime_path(*parts):
     return os.path.join(get_runtime_root(), *parts)
 
 def save_cookies(cookies, filename="cookies.json"):
-    """保存登录Cookies到文件"""
+    """保存登录Cookies到文件（目标目录不存在时自动创建）"""
     filename = os.fspath(filename)
     directory = os.path.dirname(os.path.abspath(filename))
+    # 发行包只散布 exe 时 exe 旁没有 data/ 目录, mkstemp 会直接抛
+    # FileNotFoundError: 登录凭证永远存不上, 每次运行都要重新登录, 而日志里
+    # 还会出现"已保存登录凭证...下次可免密登录"的矛盾提示 —— 这里补齐目录
+    if directory:
+        os.makedirs(directory, exist_ok=True)
     fd, temp_path = tempfile.mkstemp(prefix=".cookies-", dir=directory)
     try:
         if os.name != "nt":

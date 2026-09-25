@@ -7,7 +7,14 @@ import platform
 import sys
 import time
 
-from playwright.async_api import BrowserContext, Page, Playwright, TimeoutError, async_playwright
+from playwright.async_api import (
+    BrowserContext,
+    Error,
+    Page,
+    Playwright,
+    TimeoutError,
+    async_playwright,
+)
 from playwright._impl._errors import TargetClosedError
 
 from modules import installer, updater
@@ -65,6 +72,10 @@ ZHS_COOKIE_URLS = [
 _saved_cookies = None
 
 
+class PageUnreachableError(RuntimeError):
+    """页面在网络层面打不开(net::ERR_TIMED_OUT 等), 重试后仍失败。"""
+
+
 def _cookies_signature(cookies):
     if not cookies:
         return None
@@ -85,20 +96,24 @@ def remember_login_cookies(cookies) -> None:
     _saved_cookies = _cookies_signature(cookies)
 
 
-async def persist_login_cookies(context: BrowserContext) -> None:
-    """凭证有变化时才写盘: 登录完成、Cookie 续期后立即保存, 中断也不丢。"""
+async def persist_login_cookies(context: BrowserContext) -> bool:
+    """凭证有变化时才写盘: 登录完成、Cookie 续期后立即保存, 中断也不丢。
+
+    返回 True = 已落盘(或无需写入), False = 写盘失败。
+    """
     global _saved_cookies
     cookies = await context.cookies(ZHS_COOKIE_URLS)
     signature = _cookies_signature(cookies)
     if signature is None or signature == _saved_cookies:
-        return
+        return True
     try:
         save_cookies(cookies, COOKIE_PATH)
     except Exception as exc:
         logger.log_exception("保存登录 Cookies 失败.", exc)
-        return
+        return False
     _saved_cookies = signature
     logger.event("保存登录凭证", 条数=len(cookies), 文件=COOKIE_PATH)
+    return True
 
 
 def get_screen_size():
@@ -210,7 +225,8 @@ KEEP_ACTIVE_JS = r"""
 
 async def auto_login(context: BrowserContext, page: Page, config, modules=None) -> None:
     wait_start = time.time()
-    await page.goto(config.login_url, wait_until="commit")
+    if not await goto_with_retry(page, config.login_url):
+        raise PageUnreachableError(f"登录页无法打开: {config.login_url}")
     if not is_login_page(page.url):
         logger.info("检测到已登录,跳过登录步骤.")
         return
@@ -251,8 +267,11 @@ async def auto_login(context: BrowserContext, page: Page, config, modules=None) 
             await asyncio.gather(captcha_task, return_exceptions=True)
 
     logger.event("登录完成", 耗时=f"{time.time() - wait_start:.1f}s", 地址=page.url)
-    await persist_login_cookies(context)
-    logger.info(f"已保存登录凭证到: {COOKIE_PATH},下次可免密登录.")
+    if await persist_login_cookies(context):
+        logger.info(f"已保存登录凭证到: {COOKIE_PATH},下次可免密登录.")
+    else:
+        logger.warn("登录凭证保存失败(本次刷课不受影响, 但下次仍需重新登录).",
+                    shift=True)
 
 
 async def ensure_login(
@@ -260,7 +279,9 @@ async def ensure_login(
 ) -> bool:
     if cookies:
         logger.info("正在校验 Cookies 登录状态...")
-        await page.goto(config.login_url, wait_until="domcontentloaded")
+        if not await goto_with_retry(page, config.login_url,
+                                     wait_until="domcontentloaded"):
+            raise PageUnreachableError(f"登录页无法打开: {config.login_url}")
         try:
             await wait_for_login_complete(page, timeout=10000)
         except TimeoutError:
@@ -281,6 +302,44 @@ async def ensure_login(
     logger.info("正在等待登录完成...")
     await auto_login(context, page, config, modules)
     logger.info("登录成功!")
+    return False
+
+
+async def goto_with_retry(
+    page: Page,
+    url: str,
+    *,
+    wait_until: str = "commit",
+    attempts: int = 3,
+    delay: float = 5.0,
+    timeout_ms: int = 90_000,
+) -> bool:
+    """打开页面, 网络类错误自动重试; 全部失败返回 False。
+
+    课程页/登录页一次导航超时(net::ERR_TIMED_OUT 等)不应该让整轮刷课以
+    "系统出错,请检查后重新启动" 收场: 这里重试并把失败交给调用方决定去留。
+    """
+    last_msg = ""
+    for attempt in range(1, attempts + 1):
+        try:
+            await page.goto(url, wait_until=wait_until, timeout=timeout_ms)
+            return True
+        except TargetClosedError:
+            raise
+        except (Error, TimeoutError) as exc:
+            last_msg = str(exc).splitlines()[0] if str(exc) else exc.__class__.__name__
+            retryable = ("net::" in last_msg
+                         or "Timeout" in last_msg
+                         or "timeout" in last_msg)
+            if attempt >= attempts or not retryable:
+                logger.warn(
+                    f"打开页面失败({attempt}/{attempts}): {last_msg}", shift=True)
+                logger.event("页面加载失败", 地址=url, 原因=last_msg)
+                return False
+            logger.warn(
+                f"页面加载超时/网络异常({attempt}/{attempts}), {delay:.0f} 秒后重试: {url}",
+                shift=True)
+            await asyncio.sleep(delay)
     return False
 
 
@@ -343,7 +402,12 @@ async def main(config) -> bool:
                 logger.section(f"课程 {index}/{course_total}")
                 logger.context(课程序号=f"{index}/{course_total}", 课程地址=course_url)
                 logger.info("正在加载播放页...")
-                await page.goto(course_url, wait_until="commit")
+                if not await goto_with_retry(page, course_url):
+                    logger.error(
+                        "课程页无法打开(网络超时/被拦截), 已停止本轮; "
+                        "请检查网络或代理设置后重试.", shift=True)
+                    run_ok = False
+                    break
                 await page.wait_for_timeout(1500)
                 if "login" in page.url:
                     logger.warn(
@@ -355,7 +419,12 @@ async def main(config) -> bool:
                     remember_login_cookies(None)
                     await ensure_login(context, page, None, config, modules)
                     logger.info("重新进入播放页...")
-                    await page.goto(course_url, wait_until="commit")
+                    if not await goto_with_retry(page, course_url):
+                        logger.error(
+                            "重新登录后课程页仍无法打开(网络超时/被拦截), 已停止本轮.",
+                            shift=True)
+                        run_ok = False
+                        break
                     await page.wait_for_timeout(1500)
 
                 catalog = await detect_catalog_after_verification(page, page.url)
@@ -512,6 +581,12 @@ def cli() -> int:
             logger.error("浏览器启动失败,请检查 Chrome 或 CDP 配置!")
         else:
             logger.debug(f"浏览器关闭结束运行: {logger.summarize_exception(exc)}")
+        exit_code = 1
+    except PageUnreachableError as exc:
+        # 登录页导航重试后仍失败: 明确告诉用户是网络问题, 而不是"系统出错"
+        logger.log_exception("智慧树页面无法打开.", exc)
+        logger.error("网络无法访问智慧树(超时/被拦截), 请检查网络或代理设置后重试!",
+                     shift=True)
         exit_code = 1
     except ConfigError as exc:
         logger.error(f"配置文件无效: {exc}", shift=True)
