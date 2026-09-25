@@ -69,7 +69,7 @@ exe = EXE(
     a.binaries,
     a.datas,
     [],
-    name='学习通刷课',
+    name='xuexitongshuake',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
