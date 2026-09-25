@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Windows/GitHub Actions 与 wine 通用 onefile GUI 构建清单
 # 运行工作目录 = 打包源码目录 (wine-build/src，或 CI 复制的等价目录)
+from PyInstaller.utils.hooks import collect_data_files
 block_cipher = None
 a = Analysis(['qt_gui.py'],
              pathex=['.'],
