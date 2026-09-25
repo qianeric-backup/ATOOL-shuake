@@ -25,14 +25,34 @@ jobs:
         run: |
           pip install -q -r 学习通刷课/shuake_src/requirements.txt
           pip install -q "pyinstaller>=6.5" "PySide6==6.9.*"
+          python -c "import PySide6, selenium, pyautogui, PIL, requests, openai; print('deps ok')"
 
       - name: Build 学习通刷课.exe (onefile)
-        shell: pwsh
+        shell: bash
         working-directory: 学习通刷课/shuake_src
         run: |
-          $ErrorActionPreference = "Stop"
-          python -m PyInstaller 学习通刷课.spec --noconfirm --clean
-          Get-Item dist/*.exe | Select-Object Name, Length
+          set -uo pipefail
+          echo "::group::PyInstaller 构建"
+          python -m PyInstaller "学习通刷课.spec" --noconfirm --clean 2>&1 | tee pyi-build.log
+          code="${PIPESTATUS[0]}"
+          echo "::endgroup::"
+          if [ "$code" -ne 0 ]; then
+            echo "PyInstaller 退出码: $code"
+            tail -n 40 pyi-build.log | sed 's/^/  /'
+            msg="$(tail -n 20 pyi-build.log | tr '\n' '~' | cut -c1-4000)"
+            echo "::error title=PyInstaller 构建失败 (exit $code)::$msg"
+            exit 1
+          fi
+          ls -l dist/
+
+      - name: Upload build log (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xuexitong-pyi-build-log
+          path: 学习通刷课/shuake_src/pyi-build.log
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
