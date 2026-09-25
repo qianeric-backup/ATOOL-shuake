@@ -37,6 +37,9 @@ def runtime_packages(version_info=sys.version_info):
 # 清华等镜像会拒绝浏览器风格的 User-Agent(403), 必须使用 pip 风格 UA。
 MIRROR_HEADERS = {"User-Agent": "pip/24.3.1"}
 
+# 单个 wheel 的下载总时限(秒): 网络差时避免整轮刷课卡在下载上
+DOWNLOAD_TIMEOUT_S = 180
+
 
 def validate_python_version(version_info=sys.version_info):
     version = (version_info.major, version_info.minor)
@@ -201,8 +204,10 @@ def download_wheel(mirror_name, base_url, package_name, version=None, config_obj
     package_url = f"{base_url}/simple/{package_name}/"
 
     # 发送请求，找到匹配的 .whl 文件
+    # 必须带超时: 网络不通/被限速时无超时会让刷课线程无限卡在下载上
     logger.info(f"正在从镜像源下载 {package_name}.whl 文件...")
-    response = requests.get(package_url, headers=MIRROR_HEADERS)
+    response = requests.get(package_url, headers=MIRROR_HEADERS,
+                            timeout=(10, 30))
     response.raise_for_status()
     validate_python_version()
     # 获取当前 Python 与系统架构
@@ -225,12 +230,22 @@ def download_wheel(mirror_name, base_url, package_name, version=None, config_obj
     whl_path = os.path.join(get_res_dir(), os.path.basename(wheel_url))
     os.makedirs(os.path.dirname(whl_path), exist_ok=True)
 
-    # 下载 .whl 文件
-    response = requests.get(wheel_url, headers=MIRROR_HEADERS, stream=True)
+    # 下载 .whl 文件 (同样带超时, 避免卡死; chunk 512 太碎, 调大减少启动器开销)
+    response = requests.get(wheel_url, headers=MIRROR_HEADERS, stream=True,
+                            timeout=(10, 60))
     response.raise_for_status()
     total_size = int(response.headers.get('content-length', 0))
+    # 总时限兜底: socket read timeout 挡不住"慢速持续传输"(每次读都没超时,
+    # 但整包要几十分钟), 超过 DOWNLOAD_TIMEOUT_S 就中止并换下一个镜像
+    deadline = time.time() + DOWNLOAD_TIMEOUT_S
     with open(whl_path, 'wb') as f:
-        for chunk in response.iter_content(chunk_size=512):
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if time.time() > deadline:
+                f.close()
+                if os.path.exists(whl_path):
+                    os.remove(whl_path)
+                raise TimeoutError(
+                    f"下载 {package_name} 超过 {DOWNLOAD_TIMEOUT_S}s 未完成")
             if chunk:
                 f.write(chunk)
                 show_progress("下载进度:", current=f.tell(), total=total_size)
@@ -255,15 +270,17 @@ def is_installed(package, version):
     try:
         # 尝试导入 package
         module = import_module(mapping[package])
-        installed_version = getattr(module, "__version__", None)
-        expected_version = normalize_version(package, version)
-        if installed_version and installed_version != expected_version:
-            logger.warn(f"检测到 {package}-{installed_version}，与目标版本 {version} 不一致，将重新安装。")
-            return None, False
-        logger.info(f"{package}-{version} 已安装！")
-        return module, True
     except ImportError:
         return None, False
+    installed_version = getattr(module, "__version__", None)
+    expected_version = normalize_version(package, version)
+    if installed_version and installed_version != expected_version:
+        # 版本不同但能正常导入时直接复用: 自动滑块只做模板匹配, 对具体版本不敏感,
+        # 而重新下载在网络不稳时会失败/卡住, 反而让自动滑块降级为人工验证
+        logger.warn(
+            f"检测到 {package}-{installed_version}(期望 {version}), 直接复用现有版本")
+    logger.info(f"{package}-{installed_version or version} 已可用!")
+    return module, True
 
 
 def install_package(package, version, mirrors, config_obj=config):
@@ -349,15 +366,37 @@ def start(config_obj=None):
         if not exist:
             if mirrors is None:  # 仅在首次遇到导入失败时测试镜像
                 mirrors = test_mirrors(config_obj)
-                if not mirrors:  # 如果所有镜像都失败，直接退出
-                    logger.error("没有可用的镜像源，程序终止!")
-                    sys.exit(-1)
+                if not mirrors:
+                    # 镜像全不可用时不再终止刷课: 自动滑块降级为人工处理
+                    logger.warn(
+                        "没有可用的镜像源, 自动滑块验证将降级为人工处理; "
+                        "网络恢复后重启程序会自动补装依赖", shift=True)
+                    return _existing_modules()
             module = install_package(package, version, mirrors, config_obj)
             if not module:
-                logger.save()
-                sys.exit(-1)  # 下载或安装失败，立即退出
+                # 下载/安装失败同样不该让整个刷课流程退出(网络波动很常见):
+                # 先试试当前环境里是否已有可用的 numpy/cv2, 否则降级为人工验证
+                logger.warn(
+                    f"{package} 安装失败, 自动滑块验证将降级为人工处理; "
+                    "网络恢复后重启程序会自动补装依赖", shift=True)
+                logger.event("依赖安装失败", 包=package, 版本=version)
+                return _existing_modules()
         modules.append(module)
 
+    return modules
+
+
+def _existing_modules() -> list:
+    """依赖无法安装时的兜底: 复用当前环境里已可导入的 numpy/cv2。
+
+    (源码态或用户自行 pip install 过的环境里通常已有, exe 态一般为空 -> 降级人工)
+    """
+    modules = []
+    for package in runtime_packages():
+        try:
+            modules.append(import_module(mapping[package]))
+        except Exception:
+            return []
     return modules
 
 
