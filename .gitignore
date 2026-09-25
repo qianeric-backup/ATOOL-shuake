@@ -68,10 +68,10 @@ venv/
 .runtime_libs/
 *.deb
 
-知到刷课/autovisor-src/Autovisor-main/data/exam_cookies.json
-
-知到刷课/autovisor-src/Autovisor-main/config.ini
-
-# 含登录凭据的旧配置文件（上游遗留名, 绝不入库）
+# 含登录凭据的运行时数据（账号密码 / 智慧树登录票据, 绝不入库）
+# 注意: 上游遗留名 configs.ini 与 data/cookies.json 曾入库, 已随提交 dfbfdc1
+# 从版本控制移除; 旧凭据仍留在 git 历史中 —— 请轮换账号密码并重新登录作废旧票据。
 知到刷课/autovisor-src/Autovisor-main/configs.ini
+知到刷课/autovisor-src/Autovisor-main/config.ini
 知到刷课/autovisor-src/Autovisor-main/data/cookies.json
+知到刷课/autovisor-src/Autovisor-main/data/exam_cookies.json
