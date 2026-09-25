@@ -207,6 +207,12 @@ class QueueWriter(io.StringIO):
 def run_shuake(log_queue: queue.Queue, on_done):
     """在后台线程运行刷课主流程, 日志重定向到队列。"""
     ensure_config_file()
+    # 告知 AI 模块本次使用的配置路径(GUI 写的就是这个文件, 避免读错)
+    try:
+        import modules.ai_client as _ai
+        _ai.set_config_path(CONFIG_FILE)
+    except Exception:
+        pass
     old_stdout, old_stderr = sys.stdout, sys.stderr
     sys.stdout = QueueWriter(log_queue)
     sys.stderr = QueueWriter(log_queue)

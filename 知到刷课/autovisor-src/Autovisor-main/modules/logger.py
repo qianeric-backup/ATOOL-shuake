@@ -44,7 +44,13 @@ class Logger:
 
     @staticmethod
     def summarize_exception(exc):
-        first_line = str(exc).splitlines()[0].strip()
+        # 异常可能没有消息(str(exc) 为空, 如空消息的 ImportError),
+        # 直接取 splitlines()[0] 会 IndexError —— 而它本身就用在异常处理里,
+        # 一旦抛错就会把真实原因盖掉, 用户只看到"系统出错"
+        first_line = next(
+            (line.strip() for line in str(exc).splitlines() if line.strip()), "")
+        if not first_line:
+            return type(exc).__name__
         return f"{type(exc).__name__}: {first_line}"
 
     @staticmethod

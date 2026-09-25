@@ -226,7 +226,7 @@ async def answer_on_view(page, qinfo, ai_cfg):
         nin = await inputs.count()
         answer = await asyncio.to_thread(_ai_ask, ai_cfg, qt, qinfo["title"], None)
         if not answer:
-            logger.warn("AI 未返回答案", 题号=num_txt)
+            logger.warn(f"AI 未返回答案 (题号={num_txt})")
             return False
         tokens = _strip_tokens(answer)
         done = 0
@@ -244,7 +244,7 @@ async def answer_on_view(page, qinfo, ai_cfg):
 
     answer = await asyncio.to_thread(_ai_ask, ai_cfg, qt, qinfo["title"], texts)
     if not answer:
-        logger.warn("AI 未返回答案", 题号=num_txt)
+        logger.warn(f"AI 未返回答案 (题号={num_txt})")
         return False
     tokens = _strip_tokens(answer)
 
@@ -267,7 +267,7 @@ async def answer_on_view(page, qinfo, ai_cfg):
                 want.add(L)
                 break
     if not want:
-        logger.warn("AI 答案与选项不匹配", 题号=num_txt, 答案=answer)
+        logger.warn(f"AI 答案与选项不匹配 (题号={num_txt}, 答案={answer})")
         return False
 
     clicked = 0
@@ -369,7 +369,7 @@ async def run_exam(page, url, ai_cfg, submit=False) -> dict:
         try:
             ok = await answer_on_view(page, qinfo, ai_cfg)
         except Exception as e:
-            logger.warn("作答异常", 题序=idx + 1, 详情=str(e)[:160])
+            logger.warn(f"作答异常 (题序={idx + 1}): {str(e)[:160]}")
             ok = False
         (result["answered"] if ok else result["failed"]).append(idx + 1)
         await page.wait_for_timeout(400)

@@ -559,6 +559,13 @@ def cli() -> int:
         base_dir = os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__))
         config_path = args.config or os.path.join(base_dir, "config.ini")
         mirrors_path = os.path.join(base_dir, "data", "mirrors.json")
+        # 告知 AI 模块本次实际使用的配置路径(--config 或非默认位置时不会读错文件)
+        try:
+            import modules.ai_client as ai_client
+
+            ai_client.set_config_path(config_path)
+        except Exception:
+            pass
         config = Config(config_path, mirrors_path)
         logger.context(配置文件=config_path)
         logger.event(

@@ -220,7 +220,10 @@ def download_wheel(mirror_name, base_url, package_name, version=None, config_obj
 
     # 拼接完整 URL
     wheel_url = build_wheel_url(package_url, wheel_link)
-    whl_path = os.path.basename(wheel_url)
+    # 下载到 packages/ 而非当前工作目录: 从其他目录启动 exe 时 cwd 可能是用户
+    # 目录, 直接把 wheel 落在那里会污染用户目录(中断时还会残留几十 MB)
+    whl_path = os.path.join(get_res_dir(), os.path.basename(wheel_url))
+    os.makedirs(os.path.dirname(whl_path), exist_ok=True)
 
     # 下载 .whl 文件
     response = requests.get(wheel_url, headers=MIRROR_HEADERS, stream=True)

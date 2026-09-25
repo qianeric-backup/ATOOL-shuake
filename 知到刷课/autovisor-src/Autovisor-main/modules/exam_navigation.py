@@ -26,6 +26,8 @@ TEST_KEYWORDS = (
 
 EXAM_URL_MARK = "stuExamWeb"
 LEARN_CLICK_TIMEOUT_MS = 10_000
+# "AI 配置不完整"的提示只打一次(每个课时都会调用本模块)
+_warned_incomplete = False
 # 点击后等做题页出现的时间(弹窗/新标签需要一点时间)
 EXAM_APPEAR_TIMEOUT_S = 30
 # 单次做题的最长等待(做完整套题可能较久)
@@ -127,9 +129,14 @@ async def enter_pending_tests(page, catalog, config, logger, *, ai_cfg=None,
     if ai_cfg is None:
         ai_cfg = ai_client.load_ai_config()
     if not ai_client.is_configured(ai_cfg):
-        logger.warn(
-            "「平时测试自动做题」已开启但 AI 配置不完整(需要 api_url/api_key/ai_id), "
-            "跳过测试任务点", shift=True)
+        # 每个课时都会调用这里, 提示只打一次, 避免几十课时刷屏
+        global _warned_incomplete
+        if not _warned_incomplete:
+            _warned_incomplete = True
+            logger.warn(
+                "「平时测试自动做题」已开启但 AI 配置不完整"
+                "(需要 api_url/api_key/ai_id), 不会自动进入测试任务点",
+                shift=True)
         return 0
 
     tried = tried if tried is not None else set()

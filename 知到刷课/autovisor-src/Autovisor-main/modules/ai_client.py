@@ -31,9 +31,26 @@ def runtime_base_dir():
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
+_runtime_config_path = None
+
+
+def set_config_path(path) -> None:
+    """告知本次运行实际使用的 config.ini 路径。
+
+    主流程(CLI --config / GUI)可能从非默认位置加载配置, 若不告知, 这里的
+    候选查找会优先命中运行目录下的 config.ini, 于是 GUI 里填好的 AI 配置
+    读不到、自动答题被判定为"配置缺失"。
+    """
+    global _runtime_config_path
+    _runtime_config_path = str(path) if path else None
+
+
 def config_candidates():
-    """config.ini 候选路径(优先级): 运行目录 → 打包内置(_MEIPASS) → 源码目录"""
-    candidates = [os.path.join(runtime_base_dir(), "config.ini")]
+    """config.ini 候选路径(优先级): 本次实际配置 → 运行目录 → 打包内置 → 源码目录"""
+    candidates = []
+    if _runtime_config_path:
+        candidates.append(_runtime_config_path)
+    candidates.append(os.path.join(runtime_base_dir(), "config.ini"))
     meipass = getattr(sys, "_MEIPASS", None)
     if meipass:
         candidates.append(os.path.join(meipass, "config.ini"))
