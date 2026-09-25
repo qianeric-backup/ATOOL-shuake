@@ -24,6 +24,7 @@ jobs:
       - name: Install build deps
         run: |
           pip install -q "pyinstaller>=6.5" "PySide6==6.9.*" requests "playwright>=1.40" "numpy==1.26.4" "opencv-python==4.10.0.82" "pygetwindow==0.0.9" "Pillow>=10,<13"
+          python -c "import PIL, pygetwindow, requests, playwright, PySide6; print('deps ok')"
 
       - name: Build zhidaoshuake.exe (onefile)
         shell: pwsh
@@ -48,7 +49,13 @@ jobs:
             (Join-Path (Get-Location) 'zhidaoshuake.spec') `
             (Join-Path $src 'zhidaoshuake.spec')
           Set-Location $src
-          python -m PyInstaller "zhidaoshuake.spec" --noconfirm --clean
+          python -m PyInstaller "zhidaoshuake.spec" --noconfirm --clean *>&1 |
+            Tee-Object -FilePath pyi-build.log
+          if ($LASTEXITCODE -ne 0) {
+              Write-Host "----- PyInstaller 构建失败, 日志尾部 -----"
+              Get-Content pyi-build.log -Tail 80
+              exit 1
+          }
           Copy-Item 'dist/zhidaoshuake.exe' "$appRoot/zhidaoshuake.exe" -Force
           Get-Item $appRoot/zhidaoshuake.exe | Select-Object Name, Length
 
