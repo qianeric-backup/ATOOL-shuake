@@ -267,6 +267,12 @@ def check_vido_play(driver, last_time, current_time):
     with open(r'task/tool/account_info.json', 'r', encoding='utf-8') as f:
         account_info = json.load(f)
         speed = account_info['speed']
+    # 倍速来自配置文件，可能为空串/'1.5'/手工编辑的脏值：
+    # 直接 int() 会 ValueError 冒泡中断整页视频任务
+    try:
+        speed_num = int(float(str(speed).strip()))
+    except (TypeError, ValueError):
+        speed_num = 1
     if last_time == current_time and current_time != '':
         pause_duration = time.time() - pause_start_time
         b += 1
@@ -278,10 +284,10 @@ def check_vido_play(driver, last_time, current_time):
             except :
                 print(color.red(f'点击失败'), flush=True)
             pause_start_time = time.time()  # 记录第一次检测到暂停的时间
-        elif b == 3 and int(speed)>=2:
+        elif b == 3 and speed_num>=2:
         # 当暂停时间间隔小于2秒时，执行原elif的代码
             try:
-                if int(speed)>2:
+                if speed_num>2:
                     print(color.red(f'当前视频已被设置不能调节高倍数，现在将倍数调至2倍'), flush=True)
                     new_speed=2
                     account_info['speed'] = '2'
@@ -299,7 +305,7 @@ def check_vido_play(driver, last_time, current_time):
                 pass
             with open(r'task/tool/account_info.json', 'w', encoding='utf-8') as fil:
                 json.dump(account_info, fil)
-        elif b==3 and int(speed)==1:
+        elif b==3 and speed_num==1:
             raise Exception('视频播放异常')
     else:
         pause_start_time = 0  # 视频正常播放，重置暂停时间记录
@@ -340,7 +346,7 @@ def check_vido_finish(driver,i,time_start,total_time,vido_iframe,lock_screen,API
         parent_element2_class = parent_element2.get_attribute("class")
         txt = element2.get_attribute('aria-label')
         # print(parent_element2_class, flush=True)
-        if txt == '任务点已完成' or 'ans-attach-ct ans-job-finished' in parent_element2_class:
+        if txt == '任务点已完成' or 'ans-attach-ct ans-job-finished' in (parent_element2_class or ''):
             # pyautogui.scroll(-250)
             print(color.green(f'已完成第{i + 1}个视频'), flush=True)
             time_end = time.time()

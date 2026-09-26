@@ -39,8 +39,14 @@ class do_exam(Answer):
     # ------------------------------------------------------------------
     def wait_manual_open(self):
         now_window_handles = len(self.driver.window_handles)
-        while len(self.driver.window_handles) == now_window_handles:
+        # 等待用户手动点开考试：必须带超时，否则无人操作时进程永久挂起
+        for _ in range(300):
+            if len(self.driver.window_handles) != now_window_handles:
+                break
             time.sleep(1)
+        else:
+            print(color.red('等待手动打开考试超时（5 分钟），本次跳过'), flush=True)
+            return
         time.sleep(2)
         self.get_answer_list()
 
@@ -192,6 +198,10 @@ class do_exam(Answer):
                      '名词解释', '论述题', '计算题')
             if typename not in known:
                 print(color.red(f'第{i+1}题题型为{typename or "未知"},无法作答'))
+                # 占位追加：与题目原始索引 i 对齐（all_title_dit 的 key 就是 i），
+                # 否则跳过的未知题型会让后面所有题取到错位的题型/题目文本
+                self.only_title_text.append('')
+                self.questionType_list.append(typename)
                 continue
             self.questionType = typename
             try:

@@ -46,6 +46,24 @@ def _path(*parts):
     return os.path.join(_APP_DIR, *parts)
 
 
+# 「完整端点」后缀（长的在前：/chat/completions 必须先于 /completions 匹配）。
+# 用户常从中转站文档/控制台直接复制地址，例如 packyapi 给的
+# https://www.packyapi.ai/v1/responses：推导 base 时必须剥掉后缀，
+# 否则会拼出 .../v1/responses/chat/completions、.../v1/responses/v1/models
+# 这类 404 地址，表现为「拉取模型失败 / 测试连接失败」。
+# 与 task/tool/AIAsk.py 的 strip_endpoint 保持同一套规则。
+_ENDPOINT_SUFFIXES = ('/chat/completions', '/responses', '/completions')
+
+
+def _strip_endpoint(url):
+    """把「完整端点」地址还原成 base；本来就是 base 的原样返回"""
+    base = (url or '').strip().rstrip('/')
+    for suffix in _ENDPOINT_SUFFIXES:
+        if base.lower().endswith(suffix):
+            return base[:-len(suffix)].rstrip('/')
+    return base
+
+
 # ---------------------------------------------------------------- 常量 ----
 ACCOUNT_FILE = _path('task', 'tool', 'account_info.json')
 COURSE_FILE = _path('task', 'tool', 'course_name.json')
@@ -96,6 +114,28 @@ def load_course_names():
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+
+
+def _as_int(value, default=0):
+    """配置字段容错转 int：兼容 1/0、'1'/'0'、'True'/'False'、''、None。
+
+    旧版配置、手工编辑或导入的备份里布尔类字段可能是字符串，直接 int()
+    会 ValueError，使整个界面在启动时崩溃（load_data → _apply_saved）。
+    """
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    s = str(value).strip()
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        low = s.lower()
+        if low in ('true', 'yes', 'on'):
+            return 1
+        if low in ('false', 'no', 'off', ''):
+            return 0
+        return default
 
 
 # ---------------------------------------------------------------- 定时对话框 ----
@@ -887,6 +927,10 @@ class StartWindow(QMainWindow):
             options.add_argument('--disable-blink-features=AutomationControlled')
             if browser != 'firefox':
                 options.add_argument('--disable-web-security')
+            # 先置 None：driver_cls(...) 抛异常（驱动版本不匹配——正是本功能
+            # 最需要诊断的场景）时，finally 里对未绑定变量调用 quit() 会
+            # UnboundLocalError 覆盖真实错误
+            driver = None
             driver = driver_cls(service=service, options=options)
             try:
                 # 打开学习通首页，模拟登录
@@ -982,7 +1026,11 @@ class StartWindow(QMainWindow):
                     _json.dump(data, f, ensure_ascii=False, indent=2)
                 self.courses_fetched.emit(merged, '')
             finally:
-                driver.quit()
+                if driver is not None:
+                    try:
+                        driver.quit()
+                    except Exception:
+                        pass
         except Exception as e:
             traceback.print_exc()
             self.courses_fetched.emit([], '拉取课程失败: ' + str(e))
@@ -1053,13 +1101,7 @@ class StartWindow(QMainWindow):
         import requests
         ids = []
         err = ''
-        base = url.rstrip('/')
-        # 端点推导：用户可能填完整 chat 端点（https://api.x/v1/chat/completions），
-        # 先剥离尾部 /chat/completions 或 /completions，得到 base（原本就是 base 则不变）
-        if base.endswith('/chat/completions'):
-            base = base[:-len('/chat/completions')]
-        elif base.endswith('/completions'):
-            base = base[:-len('/completions')]
+        base = _strip_endpoint(url)
         # 探测顺序：OpenAI 兼容标准 /v1/models 优先（SiliconFlow 等根 models 404）
         endpoints = [base + '/v1/models', base + '/models',
                      base + '/api/tags', base + '/models/list']
@@ -1193,9 +1235,7 @@ class StartWindow(QMainWindow):
         """OpenAI 兼容 /chat/completions 连通性测试（任意服务商/中转站/本地推理通用）"""
         import requests
         import time as _time
-        base = url.rstrip('/')
-        if base.endswith('/chat/completions'):
-            base = base[:-len('/chat/completions')]
+        base = _strip_endpoint(url)
         headers = {'Content-Type': 'application/json'}
         if key:
             headers['Authorization'] = 'Bearer ' + key
@@ -1504,15 +1544,20 @@ class StartWindow(QMainWindow):
             for fn in files:
                 if 'ques1' not in fn:
                     continue
-                with open(os.path.join(folder, fn), 'rb') as f:
-                    value = pickle.load(f).get('value', {})
+                try:
+                    with open(os.path.join(folder, fn), 'rb') as f:
+                        value = pickle.load(f).get('value', {})
+                except Exception:
+                    # 损坏/截断/其它 Python 版本写入的 pkl：跳过该文件即可，
+                    # 不能让 UnpicklingError 冒到 Qt 事件循环（3.11+ 会终止应用）
+                    continue
                 content += '问题: ' + str(value.get('question', '')) + '\n'
                 content += str(value.get('options', '')) + '\n'
                 content += '答案为: ' + str(value.get('answer', '')) + '\n\n'
             if not content:
                 content = '暂无缓存的题目'
             self.tiku_text.setPlainText(content)
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError):
             self.tiku_text.setPlainText('暂无缓存的题目')
 
     def show_error(self):
@@ -1607,7 +1652,7 @@ class StartWindow(QMainWindow):
     def run_program(self, cmd):
         """启动 main.py 子进程并实时读取输出显示到日志框（后台线程）"""
         try:
-            self.process = subprocess.Popen(
+            proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
                 cwd=_APP_DIR,
@@ -1618,25 +1663,36 @@ class StartWindow(QMainWindow):
                 **({} if os.name == 'nt' else {'start_new_session': True}))
         except Exception as e:
             self._append_log(f'启动失败: {e}')
+            self.program_finished.emit()
             return
-        while True:
-            if self.process is None:
-                break
-            line = self.process.stdout.readline()
-            if not line and self.process.poll() is not None:
-                break
-            if line:
-                text = self._strip_ansi(line.decode('utf-8', errors='ignore'))
-                self.log_signal.emit(text)   # 跨线程经信号写 UI，禁止直调 QTextEdit
-        self.process.stdout.close()
+        # 全程只引用局部 proc：close_program（UI 线程）会把 self.process 置 None，
+        # 直接解引用 self.process 会 AttributeError，使 program_finished 不再发出，
+        # 「结束刷课」按钮永久卡住
+        self.process = proc
         try:
-            self.process.wait()
+            while True:
+                line = proc.stdout.readline()
+                if not line and proc.poll() is not None:
+                    break
+                if line:
+                    text = self._strip_ansi(line.decode('utf-8', errors='ignore'))
+                    self.log_signal.emit(text)   # 跨线程经信号写 UI，禁止直调 QTextEdit
         except Exception:
             pass
-        self.process = None
-        if self.process_condition:
-            self.log_signal.emit('\n刷课子进程已结束')
-        self.program_finished.emit()   # 子进程结束，恢复「开始刷课」按钮
+        finally:
+            try:
+                proc.stdout.close()
+            except Exception:
+                pass
+            try:
+                proc.wait()
+            except Exception:
+                pass
+            if self.process is proc:
+                self.process = None
+            if self.process_condition:
+                self.log_signal.emit('\n刷课子进程已结束')
+            self.program_finished.emit()   # 子进程结束，恢复「开始刷课」按钮
 
     @staticmethod
     def _strip_ansi(text):
@@ -1934,6 +1990,32 @@ class StartWindow(QMainWindow):
         data['theme'] = self.theme_entry.currentText() if hasattr(self, 'theme_entry') else '明亮'
         return data
 
+    def _auto_download_edge_driver(self):
+        """Edge 驱动缺失/不匹配时自动下载（成功返回 True 并回填驱动路径）。
+
+        只判断「文件是否存在」不够：与本机 Edge 主版本不一致的驱动照样
+        启动不了浏览器（Edge 抛 SessionNotCreatedException），所以交给
+        ensure_edge_driver 一并处理版本比对。下载约 12MB 且为同步执行，
+        先刷新一次状态栏再开始，避免用户以为界面卡死。
+        """
+        self._set_status('未找到可用的 Edge 驱动，正在自动下载匹配本机 Edge 的版本…', 'info')
+        QApplication.processEvents()
+        try:
+            from task.tool.edge_driver import ensure_edge_driver
+            path = ensure_edge_driver(
+                current=self.browser_driver_entry.text().strip(),
+                log=lambda m: self._append_log(m + '\n'))
+        except Exception:
+            import traceback
+            traceback.print_exc()
+            return False
+        if not path:
+            self._set_status('Edge 驱动自动下载失败，请手动选择驱动文件', 'error')
+            return False
+        self.browser_driver_entry.setText(path)
+        self._set_status('Edge 驱动已自动下载完成', 'ok')
+        return True
+
     def save(self):
         errors = []
         browser = self.browser_entry.currentText()
@@ -1956,6 +2038,9 @@ class StartWindow(QMainWindow):
                         self.browser_driver_entry.setText(cand)
                         ok = True
                         break
+            if not ok and browser.strip().lower() == 'edge':
+                # 驱动缺失 / 与本机 Edge 主版本不匹配：自动从微软官方通道获取
+                ok = self._auto_download_edge_driver()
             if not ok:
                 errors.append('驱动文件不存在，请选择正确的驱动文件')
         else:
@@ -2033,6 +2118,17 @@ class StartWindow(QMainWindow):
         self._suppress_signals = True
         try:
             self._apply_saved(data)
+        except Exception:
+            # 已保存配置字段异常（旧版 / 手工编辑 / 导入的备份）不应让界面
+            # 直接启动失败：打印堆栈、按默认值继续，提示用户重新保存
+            import traceback
+            traceback.print_exc()
+            self.browser_entry.setCurrentText(self._default_browser())
+            self.auto_fill_browser_driver(self._default_browser())
+            QMessageBox.warning(
+                self, '配置读取异常',
+                '已保存的配置存在无法识别的字段，界面已按默认值加载。\n'
+                '请在设置页重新填写并点击「保存设置」以修正配置。')
         finally:
             self._suppress_signals = False
 
@@ -2083,7 +2179,7 @@ class StartWindow(QMainWindow):
             else data.get('discussion_choice', '跳过讨论'))
         self.homework_entry.setCurrentText(data.get('homework', '手动选择'))
 
-        mode = int(data.get('radio_var', 1))
+        mode = _as_int(data.get('radio_var', 1), 1)
         legacy_exam = False
         if mode == 3:
             # 旧版「自动完成考试」单选：并入作业模式 + 任务类型=考试
@@ -2099,10 +2195,11 @@ class StartWindow(QMainWindow):
         elif data.get('task_type') in ('作业', '考试'):
             self.task_kind_entry.setCurrentText(data['task_type'])
 
-        self.pass_face_check.setChecked(bool(data.get('pass_face', 0)))
-        self.lock_screen_check.setChecked(bool(data.get('lock_screen', 0)))
-        self.debug_check.setChecked(bool(int(data.get('debug_mode', 1))))
-        self.uxue_check.setChecked(bool(int(data.get('uxue_inject', 0))))
+        # 布尔类字段一律走 _as_int：字符串 '0'/'False' 直接 bool() 会被当成 True
+        self.pass_face_check.setChecked(bool(_as_int(data.get('pass_face', 0))))
+        self.lock_screen_check.setChecked(bool(_as_int(data.get('lock_screen', 0))))
+        self.debug_check.setChecked(bool(_as_int(data.get('debug_mode', 1), 1)))
+        self.uxue_check.setChecked(bool(_as_int(data.get('uxue_inject', 0), 0)))
         # 恢复主题（默认明亮；暗黑时切换）
         saved_theme = data.get('theme', '明亮')
         try:

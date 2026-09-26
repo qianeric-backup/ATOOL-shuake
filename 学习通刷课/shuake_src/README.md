@@ -22,7 +22,7 @@ python -m PyInstaller 学习通刷课.spec --noconfirm --clean
 
 产物位于 `dist/学习通刷课.exe`。spec 已精简：不再用 `collect_all('PySide6')` 打包整个 Qt 全家桶，仅收集本项目用到的 `QtCore/QtGui/QtWidgets/QtNetwork` 与必要插件，并排除用不到的 Qt 附加模块（3D/WebEngine/多媒体等），**exe 体积约 136MB**（精简前约 330MB），首次解压与启动明显加快。首次运行会在 exe 同目录解压 `task/` 资源。
 
-> 依赖说明：此版本仍需要 `selenium`（刷课核心），需先 `pip install -r requirements.txt`；若 exe 报 `No module named 'selenium'` 说明打包环境缺少 selenium，装上后重打即可。", "old_string": "> 说明：本仓库已由原生 tkinter 界面升级为 Qt（PySide6）界面，功能保持一致。旧 tk 界面备份在 `start_tk.py`，如需使用可把 `start_tk.py` 改回 `start.py` 或直接运行 `start_tk.py`。", "path": "C:\\Users\\qianeric\\Documents\\reasonix-project\\学习通刷课\\shuake_src\\README.md"}
+> 依赖说明：此版本仍需要 `selenium`（刷课核心），需先 `pip install -r requirements.txt`；若 exe 报 `No module named 'selenium'` 说明打包环境缺少 selenium，装上后重打即可。
 
 ## 环境要求
 
@@ -32,7 +32,7 @@ python -m PyInstaller 学习通刷课.spec --noconfirm --clean
 ### 所需 Python 库
 
 ```bash
-pip install selenium pyautogui requests PySide6 colorama openai", "old_string": "pip install selenium pyautogui requests customtkinter colorama openai", "path": "C:\\Users\\qianeric\\Documents\\reasonix-project\\学习通刷课\\shuake_src\\README.md"}
+pip install selenium pyautogui requests PySide6 colorama openai
 ```
 
 ## 配置说明
@@ -43,7 +43,7 @@ pip install selenium pyautogui requests PySide6 colorama openai", "old_string": 
 
 | 平台 | 默认浏览器 | 默认驱动（按顺序自动探测） |
 |---|---|---|
-| **Windows** | **Edge** | 项目目录 `edgedriver_win64\msedgedriver.exe` → 系统 PATH → Selenium Manager 自动下载 |
+| **Windows** | **Edge** | 项目目录 `edgedriver_win64\msedgedriver.exe` → 系统 PATH → **自动下载匹配本机 Edge 的驱动** → Selenium Manager |
 | **Linux / macOS** | **Firefox** | 项目目录 `学习通刷课/geckodriver/geckodriver` → `/usr/bin`、`/usr/local/bin`、`/snap/bin` → 系统 PATH → Selenium Manager |
 
 - 设置页切换浏览器时，驱动输入框自动回填对应平台的默认值；
@@ -51,6 +51,8 @@ pip install selenium pyautogui requests PySide6 colorama openai", "old_string": 
 - 保存配置时的驱动校验与运行时解析链一致：真实文件 → 系统 PATH → 项目约定目录。
 
 ### 驱动下载（必须与浏览器主版本一致）
+
+> **Edge 驱动已自动化，无需手动下载。** 驱动缺失、或与本机 Edge 主版本不一致（Edge 自动升级后的典型情况）时，程序会自行从微软官方通道 `msedgedriver.microsoft.com` 取匹配版本并放入 `edgedriver_win64\`。命令行刷课和界面「保存设置」都会触发；取不到（离线、无对应版本）时自动降级到 Selenium Manager，不影响使用。
 
 **Windows**
 
@@ -69,6 +71,8 @@ pip install selenium pyautogui requests PySide6 colorama openai", "old_string": 
 | Edge | msedgedriver | 手动下载 linux64 版（地址同上 Edge 行），解压到 PATH |
 
 **版本匹配规则**：驱动主版本号必须等于浏览器主版本号（如 Edge 131 ↔ msedgedriver 131.x、Firefox 155 ↔ geckodriver 0.36+）。版本不匹配时程序会在日志中打印当前/期望版本与下载链接。macOS 下载对应 mac 平台包即可，要求相同。
+
+Edge 升级后不必手动换驱动：程序检测到主版本不一致会自动重新下载（优先取官方 `LATEST_RELEASE_<主版本>` 即该大版本最新驱动，其次用本机 Edge 的精确版本），已匹配时不会重复下载。
 
 ### API 设置
 

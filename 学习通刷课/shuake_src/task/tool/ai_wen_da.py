@@ -56,15 +56,26 @@ class Cache:
     @staticmethod
     def get(key: str, default: Any = None) -> Any:
         """获取缓存"""
+        cache_path = fr'task/record/cache_{key}.pkl'
         try:
-            with open(fr'task/record/cache_{key}.pkl', 'rb') as f:
+            with open(cache_path, 'rb') as f:
                 cache_data = pickle.load(f)
-                if cache_data['expire'] > 0 and cache_data['expire'] < time.time():
-                    os.remove(f'cache_{key}.pkl')
-                    return default
-                return cache_data['value']
         except FileNotFoundError:
             return default
+        except Exception as e:
+            print(f"缓存获取失败: {e}")
+            return default
+        try:
+            if cache_data['expire'] > 0 and cache_data['expire'] < time.time():
+                # 删除过期缓存：必须在 with 块外（Windows 上文件句柄未释放时
+                # os.remove 会 PermissionError）；原写法路径还少了 task/record/
+                # 前缀，导致永远删不掉且每次都打印"缓存获取失败"
+                try:
+                    os.remove(cache_path)
+                except OSError:
+                    pass
+                return default
+            return cache_data['value']
         except Exception as e:
             print(f"缓存获取失败: {e}")
             return default

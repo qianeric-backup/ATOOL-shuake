@@ -9,7 +9,7 @@
   3.问：浏览器驱动在哪里下载？
     答：
     - Chrome 驱动：https://googlechromelabs.github.io/chrome-for-testing/
-    - Edge 驱动：https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/
+    - Edge 驱动：程序会自动下载（驱动缺失、或与本机 Edge 主版本不一致时），无需手动操作；也可从 https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/ 手动下载后放入 edgedriver_win64\
     - Firefox 驱动（geckodriver）：https://github.com/mozilla/geckodriver/releases
 
 二、驱动地址相关
@@ -26,7 +26,8 @@
     答：在"高级设置"中填写你的 API Key。支持任意 OpenAI 兼容接口（如 DeepSeek、OpenRouter、本地 vLLM 等），不再限制必须以 sk- 开头。
 
   2.问：API 地址怎么填写？
-    答：填写接口的 base URL，例如默认的 https://api.deepseek.com 或自定义中转地址。留空则使用默认地址。
+    答：填写接口的 base URL，例如默认的 https://api.deepseek.com 或自定义中转地址（如中转站 https://www.packyapi.ai/v1）。留空则使用默认地址。
+        直接粘贴完整端点也可以：地址以 /chat/completions、/responses、/completions 结尾时，程序会自动剥掉该后缀，与填 base URL 等价（部分中转站文档只给 https://xxx/v1/responses 这种写法）。
 
   3.问：模型名怎么填写？
     答：可留空。留空时程序会自动向 API 接口请求模型列表，并优先选用对话/聊天类模型；也可以手动指定模型名（需确保该模型在你的 API 中可用）。

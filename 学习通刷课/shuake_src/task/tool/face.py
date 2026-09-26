@@ -26,13 +26,22 @@ def check_face(driver,face_url,face_class='popDiv wid640 faceCollectQrPop popCla
             break
 def get_cookie(driver,file_name='cookies',course_name=''):
     try:
-        pickle.dump(driver.get_cookies(), open(rf'task/tool/{file_name}.pkl', 'wb'))
+        with open(rf'task/tool/{file_name}.pkl', 'wb') as f:
+            pickle.dump(driver.get_cookies(), f)
         if file_name=='face_cookies':
-            with open(rf'task/tool/face_url.json', 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                data[course_name] = driver.current_url
-                # print(data['face_url'], flush=True)
-                json.dump(data, open(rf'task/tool/face_url.json', 'w', encoding='utf-8'))
+            face_url_path = rf'task/tool/face_url.json'
+            try:
+                with open(face_url_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if not isinstance(data, dict):
+                    data = {}
+            except (OSError, ValueError):
+                # 文件缺失/内容损坏（首次刷脸、被截断）：重建字典再写回，
+                # 不能让 json.load 的异常把"获取 cookie 失败"报成错误
+                data = {}
+            data[course_name] = driver.current_url
+            with open(face_url_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False)
         return True
     except PermissionError:
         print(color.red('请在关闭该窗口后，再右键点击刷课程序用管理员权限打开'))
@@ -51,8 +60,9 @@ def auto_login_with_cookies(driver,file_name='cookies', url='https://i.chaoxing.
         # 清除可能存在的旧cookie
         # driver.delete_all_cookies()
         try:
-            cookies = pickle.load(open(rf'task/tool/{file_name}.pkl', 'rb'))
-        except:
+            with open(rf'task/tool/{file_name}.pkl', 'rb') as f:
+                cookies = pickle.load(f)
+        except Exception:
             return False
         print(color.green('正在尝试自动跳过。。。'),flush=True)
         # 逐个添加cookie

@@ -38,8 +38,14 @@ class do_work(Answer):
 
     def wait_manual_open(self):
         now_window_handles = len(self.driver.window_handles)
-        while len(self.driver.window_handles) == now_window_handles:
+        # 等待用户手动点开作业：必须带超时，否则无人操作时进程永久挂起
+        for _ in range(300):
+            if len(self.driver.window_handles) != now_window_handles:
+                break
             time.sleep(1)
+        else:
+            print(color.red('等待手动打开作业超时（5 分钟），本次跳过'), flush=True)
+            return
         time.sleep(2)
         self.get_answer_list()
 
@@ -168,6 +174,11 @@ class do_work(Answer):
             self.questionType = self.questionList0[i].get_attribute('typename')
             if self.questionType not in ['填空题','判断题','单选题','多选题','简答题','名词解释','论述题','计算题']:
                 print(color.red(f'第{i+1}题题型为{self.questionType},无法作答'))
+                # 占位追加：questionType_list/only_title_text 必须与题目原始索引 i
+                # 对齐（all_title_dit/num_option_dit 的 key 就是 i），否则跳过的
+                # 未知题型会让后面所有题取到错位的题型/题目文本
+                self.only_title_text.append('')
+                self.questionType_list.append(self.questionType)
                 continue
             self.title = self.questionList0[i].find_element(By.CSS_SELECTOR, '[class="mark_name colorDeep fontLabel workTextWrap"]').text
             self.title_text=self.title [self.title.find(")") + 1:]
@@ -178,6 +189,9 @@ class do_work(Answer):
             # print(self.questionType,self.title_content)
             if self.title_text == '':
                 print(color.red('未检测到题目内容'), flush=True)
+                # 占位：all_optionWebElementList 的索引必须与 all_title_dit 的
+                # key（题目原始索引）一致，否则后面会点到别题的选项
+                self.all_optionWebElementList.append(None)
                 continue
             self.optionWebElementList = self.questionList0[i].find_elements(By.CSS_SELECTOR,
                                                                                      '[class*="clearfix answerBg"]')

@@ -59,8 +59,11 @@ class Answer:
         self.API_URL=api_url
         self.API_MODEL=api_model
         self.work_choice=work_choice
+        # 原始设置值单独保留：重做时（main 里递归构造 Answer）必须传回原始字符串，
+        # 否则第二次构造会对已被转成 float 的同名字段执行 re.search → TypeError
+        self._raw_after_finish_question = after_finish_question
         # 使用正则表达式提取百分比数字
-        match = re.search(r'(\d+)%', after_finish_question)
+        match = re.search(r'(\d+)%', str(after_finish_question))
         if match:
             self.after_finish_question = int(match.group(1)) / 100
         else:
@@ -119,7 +122,8 @@ class Answer:
                 print(color.green('开始第{}次重新做题'.format(self.times+1)))
                 self.driver.switch_to.frame('iframe')
                 print(color.green('重新做题'), flush=True)
-                Answer(self.driver, self.frame, self.course_name, self.API_KEY, self.work_choice,self.after_finish_question,self.times+1)
+                Answer(self.driver, self.frame, self.course_name, self.API_KEY, self.work_choice,
+                       self._raw_after_finish_question, self.times+1)
             elif self.times>=3:
                 print(color.red('测试答题失败，已重试3次'), flush=True)
     def get_title_option(self):
@@ -170,10 +174,27 @@ class Answer:
             self.all_title_dit[i] = self.title_and_option_text
             self.num_option_dit[i] = self.option_text_list
 
+    @staticmethod
+    def _parse_answer_list(raw):
+        """解析题库/AI 返回的答案。
+
+        字符串按 Python 字面量解析（'["A"]' / "['A']"）；遇到格式漂移
+        （自然语言、"答案：A"、带换行等非字面量）时退化为原字符串单元素
+        列表，避免 ValueError/SyntaxError 冒泡导致整卷不答。
+        """
+        if isinstance(raw, str):
+            try:
+                return ast.literal_eval(raw)
+            except (ValueError, SyntaxError):
+                return [raw.strip()] if raw.strip() else []
+        return raw
+
     def use_ai_wen_da(self):
         for i in self.all_title_dit.keys():
             if self.times==0 and self.work_choice!='随机答题':
                 print(color.green('\n<===================  分隔线  ===================>\n'), flush=True)
+                # 先置空：搜索抛异常时不能沿用上一题的答案（会错答本题）
+                self.answer_list = None
                 try:
                     self.answer_list = asyncio.run(
                         main(self.questionType_list[i], self.only_title_text[i], self.num_option_dit[i], self.API_KEY,
@@ -181,8 +202,7 @@ class Answer:
                 except Exception as e:
                     print(color.red(f'第{i+1}题搜索失败：{e}'), flush=True)
 
-                if type(self.answer_list) is str:
-                    self.answer_list = ast.literal_eval(self.answer_list)
+                self.answer_list = self._parse_answer_list(self.answer_list)
                 if not self.answer_list:
                     try:
                         self.answer_list = asyncio.run(
@@ -190,13 +210,18 @@ class Answer:
                                  api_url=self.API_URL, api_model=self.API_MODEL))
                     except Exception as e:
                         print(color.red(f'第{i+1}题搜索失败：{e}'), flush=True)
-                    if type(self.answer_list) is str:
-                        self.answer_list = ast.literal_eval(self.answer_list)
+                    self.answer_list = self._parse_answer_list(self.answer_list)
             elif self.work_choice!='随机答题':
                 self.answer_list=[]
             elif self.work_choice=='随机答题':
-                self.answer_list=[random.choice(self.num_option_dit[i])]
-                print(color.red(f'本次采用随机答题,随机答案为：{self.answer_list}'),flush=True)
+                options = self.num_option_dit.get(i) or []
+                if options:
+                    self.answer_list=[random.choice(options)]
+                    print(color.red(f'本次采用随机答题,随机答案为：{self.answer_list}'),flush=True)
+                else:
+                    # 选项未渲染（判断题/页面未加载完）时不能 random.choice 空列表
+                    self.answer_list=[]
+                    print(color.red(f'第{i+1}题无可选项，跳过该题'), flush=True)
             if not self.answer_list:
                 self.num_answer_dit[i] = []
                 # print(color.red('无答案，跳过'), flush=True)

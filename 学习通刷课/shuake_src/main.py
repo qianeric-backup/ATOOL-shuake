@@ -24,6 +24,7 @@ from task.tool.face import check_face,get_cookie,auto_login_with_cookies
 from task.finish_dicussion import finish_discussion
 from task.play_audio import play_audio
 from task.tool import color
+from task.tool import runtime_flags
 from task.watch_live import watch_live
 from task.watch_ppt import __ppt
 from task.watch_vido import study_page
@@ -136,11 +137,14 @@ def save_course_lst(driver,class_name,course_elements,phone_number):
         if len(new_course_elements)==0:
             # 容器内查不到时回退到外层已找到的课程元素（条件原写反导致误报"获取课程列表失败"）
             new_course_elements=course_elements
-        course_list = [course_element.get_attribute('title') for course_element in new_course_elements if
-                       course_element.get_attribute('title')!= '']
+        # get_attribute 对无 title 的元素返回 None：原过滤条件 None != '' 为真，
+        # 会把 null 写进 course_name.json，GUI 启动时 addItems(None) 直接崩溃
+        course_list = [(course_element.get_attribute('title') or '').strip()
+                       for course_element in new_course_elements]
+        course_list = [c for c in course_list if c]
         if len(course_list)==0:
-            course_list=[course_element.text for course_element in new_course_elements if
-                       course_element.text!= '']
+            course_list=[(course_element.text or '').strip() for course_element in new_course_elements]
+            course_list=[c for c in course_list if c]
         if len(course_list) == 0:
             print(color.red(f'获取课程列表失败'), flush=True)
         else:
@@ -235,7 +239,9 @@ def choice_course(driver, course_name,speed,task_type,phone_number):
         # 遍历所有课程元素
         for course_element in course_elements:
             # 如果课程元素的标题属性与指定的课程名称匹配
-            if  course_name in course_element.get_attribute('title') or course_name in course_element.text:
+            # （get_attribute 对无 title 的元素返回 None，None 上用 in 会 TypeError）
+            course_title_attr = course_element.get_attribute('title') or ''
+            if  course_name in course_title_attr or course_name in (course_element.text or ''):
                 # 滚动到课程名称元素的位置
                 driver.execute_script("arguments[0].scrollIntoView();", course_element)
                 if task_type not in ('作业', '考试'):
@@ -246,9 +252,9 @@ def choice_course(driver, course_name,speed,task_type,phone_number):
                 print(color.green(f'您已选择《{course_name}》'), flush=True)
                 break
         else:
-            # 体验最新版本
-            driver.find_element(By.CSS_SELECTOR, ".experience").click()
-            print(color.green('正在体验最新版本'), flush=True)
+            # 体验最新版本（元素缺失时 experience 内部静默跳过，不再因
+            # find_element 抛异常把流程带进下面的"未找到课程"分支）
+            experience(driver)
             if not turn_page(driver,'新泛雅'):
                 turn_page(driver,'课程')
             element=driver.find_elements(By.XPATH,'//*[@id="stukc"]/div[1]/div[1]/div/a')
@@ -263,8 +269,13 @@ def choice_course(driver, course_name,speed,task_type,phone_number):
         print(color.red(f"未找到《{course_name}》这门课程，请检查名称是否正确，或手动选择你要刷课的课程，打开该课程后等待片刻"),
               flush=True)
         now_window_handles=len(driver.window_handles)
-        while len(driver.window_handles)==now_window_handles:
+        # 等待用户手动打开课程窗口：必须带超时，否则无人操作时本进程永久挂起
+        for _ in range(300):
+            if len(driver.window_handles) != now_window_handles:
+                break
             time.sleep(1)
+        else:
+            print(color.red('等待手动打开课程超时（5 分钟），本次跳过该课程'), flush=True)
         time.sleep(1)
         return
 
@@ -590,6 +601,24 @@ def _find_project_driver(name):
                 return cand
     return None
 
+def _cleanup_driver_tmpdir(driver):
+    """清理 start_browser 为 Firefox 扩展转换创建的临时目录（xpi_*）。
+
+    不清理时每次以 Firefox 启动都会在系统临时目录遗留一个含 .xpi 的目录。
+    """
+    tmpdir = getattr(driver, '_xpi_tmpdir', None)
+    if not tmpdir:
+        return
+    try:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+    except Exception:
+        pass
+    try:
+        driver._xpi_tmpdir = None
+    except Exception:
+        pass
+
+
 def start_browser(browser,driver_path,speed,debug=True):
     # 调试模式关闭时进入无头静默刷课：不显示窗口、不占鼠标键盘
     from task.tool import runtime_flags
@@ -612,6 +641,19 @@ def start_browser(browser,driver_path,speed,debug=True):
     if driver_path and not os.path.isfile(driver_path):
         driver_path = (shutil.which(driver_path)
                        or _find_project_driver(driver_path))
+    if browser == 'edge':
+        # 驱动缺失、或与本机 Edge 主版本不一致（Edge 自动升级后的典型情况）时，
+        # 自动从微软官方通道下载匹配版本；任何失败都静默降级到下面的
+        # Selenium Manager，不会中断刷课
+        try:
+            from task.tool.edge_driver import ensure_edge_driver
+            auto = ensure_edge_driver(
+                current=driver_path,
+                log=lambda m: print(color.blue(m), flush=True))
+            if auto:
+                driver_path = auto
+        except Exception:
+            traceback.print_exc()
     if driver_path and not os.path.isfile(driver_path):
         print(color.yellow(f'驱动 {driver_path} 不存在，改用 Selenium Manager 自动定位'), flush=True)
         driver_path = None
@@ -644,6 +686,7 @@ def start_browser(browser,driver_path,speed,debug=True):
         driver = webdriver.Firefox(service=service, options=options)
         import tempfile
         tmpdir = tempfile.mkdtemp(prefix='xpi_')
+        driver._xpi_tmpdir = tmpdir   # 由 main() 收尾时统一清理
         ext_plan = []
         if speed != '1':
             ext_plan.append(('speed.crx', '倍速'))
@@ -784,52 +827,66 @@ def main(browser, driver_path, phone_number, password, choice, course_lst,API,af
          lock_screen,speed, task_type,homework,pass_face,video_title_choice,discussion_choice,
          API_URL='', API_MODEL='', debug=True, uxue_inject=False):
     driver = start_browser(browser, driver_path,speed,debug=debug)
-    if not login_study(driver, phone_number, password):
-        # 登录失败（含无头模式账密重试 3 次未过）：中止本次刷课
+    try:
+        if not login_study(driver, phone_number, password):
+            # 登录失败（含无头模式账密重试 3 次未过）：中止本次刷课
+            return
+        for course_name in course_lst:
+            choice_course(driver, course_name, speed,  task_type,phone_number)
+            turn_page(driver, course_name)
+            experience(driver)
+            if uxue_inject:
+                # uXueScript 注入模式：页面内脚本自动扫章节树并推进全部任务点
+                # （视频播放/倍速锁定/静音、PDF 自动滚动、失焦防暂停守护；
+                #   Quiz 任务点无后端能力会自动跳过）
+                inject_uxue(driver, speed)
+                wait_uxue_finished(driver)
+                print(color.yellow('注入模式提示：测验(Quiz)任务点未自动处理，'
+                                   '如需刷题请关闭注入模式后重跑本课程'), flush=True)
+                driver.close()
+                turn_page(driver, '个人空间')
+                continue
+            if pass_face==1:
+                # face_url.json 缺失/损坏（首次使用、打包资源未解压、cwd 不符）时
+                # 不应终止整次刷课：地址缺省为空，交给 check_face 的 cookie 跳过流程
+                face_url = ''
+                try:
+                    with open(rf'task/tool/face_url.json', 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                    face_url = data.get(course_name,'') or ''
+                except (OSError, ValueError):
+                    print(color.yellow('未读到 face_url.json（首次刷脸前属正常），'
+                                       '本次不预置人脸地址'), flush=True)
+                check_face(driver,face_url,course_name=course_name)
+                check_face(driver,face_url,face_class='maskDiv',course_name=course_name)
+            if find_mission(driver,task_type,speed):
+                if task_type=='作业':
+                    do_work(driver,course_name,homework,API,after_finish_question=after_finish_question,api_url=API_URL,api_model=API_MODEL)
+                    break
+                if task_type=='考试':
+                    do_exam(driver,course_name,API,mode=homework,api_url=API_URL,api_model=API_MODEL)
+                    break
+                turn_page(driver, '学生学习页面')
+                fold(driver)
+                if not runtime_flags.HEADLESS:
+                    # 无头静默模式下没有可见窗口，发键盘事件只会干扰用户当前程序
+                    pyautogui.hotkey('ctrl', 'm')
+                if pass_face==1:
+                    print(color.green('删除人脸中，请耐心等待...'), flush=True)
+                    delete_face_popup(driver)
+                    delete_face_popup(driver,'maskDiv1 starttippop faceRecognition_1 chapterVideoFaceMaskDiv')
+                run(driver, choice, course_name, API, lock_screen,pass_face,video_title_choice,discussion_choice,after_finish_question,
+                     API_URL, API_MODEL)
+            driver.close()
+            turn_page(driver, '个人空间')
+    finally:
+        # 统一收尾：正常结束 / 异常 / 作业考试提前结束都必须释放浏览器与驱动进程，
+        # 否则每轮刷课都会残留浏览器窗口和 msedgedriver/geckodriver 进程
         try:
             driver.quit()
         except Exception:
             pass
-        return
-    for course_name in course_lst:
-        choice_course(driver, course_name, speed,  task_type,phone_number)
-        turn_page(driver, course_name)
-        experience(driver)
-        if uxue_inject:
-            # uXueScript 注入模式：页面内脚本自动扫章节树并推进全部任务点
-            # （视频播放/倍速锁定/静音、PDF 自动滚动、失焦防暂停守护；
-            #   Quiz 任务点无后端能力会自动跳过）
-            inject_uxue(driver, speed)
-            wait_uxue_finished(driver)
-            print(color.yellow('注入模式提示：测验(Quiz)任务点未自动处理，'
-                               '如需刷题请关闭注入模式后重跑本课程'), flush=True)
-            driver.close()
-            turn_page(driver, '个人空间')
-            continue
-        if pass_face==1:
-            with open(rf'task/tool/face_url.json', 'r', encoding='utf-8') as f:
-                data = json.load(f)
-                face_url = data.get(course_name,'')
-            check_face(driver,face_url,course_name=course_name)
-            check_face(driver,face_url,face_class='maskDiv',course_name=course_name)
-        if find_mission(driver,task_type,speed):
-            if task_type=='作业':
-                do_work(driver,course_name,homework,API,after_finish_question=after_finish_question,api_url=API_URL,api_model=API_MODEL)
-                return
-            if task_type=='考试':
-                do_exam(driver,course_name,API,mode=homework,api_url=API_URL,api_model=API_MODEL)
-                return
-            turn_page(driver, '学生学习页面')
-            fold(driver)
-            pyautogui.hotkey('ctrl', 'm')
-            if pass_face==1:
-                print(color.green('删除人脸中，请耐心等待...'), flush=True)
-                delete_face_popup(driver)
-                delete_face_popup(driver,'maskDiv1 starttippop faceRecognition_1 chapterVideoFaceMaskDiv')
-            run(driver, choice, course_name, API, lock_screen,pass_face,video_title_choice,discussion_choice,after_finish_question,
-                 API_URL, API_MODEL)
-        driver.close()
-        turn_page(driver, '个人空间')
+        _cleanup_driver_tmpdir(driver)
 
 
 def extract_browser_versions(error_text):
@@ -916,6 +973,28 @@ def parse_versions_from_text(error_text):
 
     return versions
 
+def _as_int(value, default=0):
+    """配置字段容错转 int：兼容 1/0、'1'/'0'、'True'/'False'、''、None。
+
+    旧版/手工编辑/导入的配置里布尔类字段可能是字符串，直接 int() 会
+    ValueError，导致 GUI 启动崩溃或刷课一行不跑只报"出错了"。
+    """
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    s = str(value).strip()
+    try:
+        return int(s)
+    except (TypeError, ValueError):
+        low = s.lower()
+        if low in ('true', 'yes', 'on'):
+            return 1
+        if low in ('false', 'no', 'off', ''):
+            return 0
+        return default
+
+
 def run_main():
     try:
         with open(r'task/tool/account_info.json', 'r', encoding='utf-8') as fil:
@@ -923,12 +1002,28 @@ def run_main():
         # 浏览器未设置时按平台取默认：Windows→edge，Linux/macOS→firefox
         browser = (account_info.get('browser') or ''
                    or ('edge' if os.name == 'nt' else 'firefox'))
-        main(browser, account_info.get('driver_path', ''), account_info['phone_number'], account_info['password'],account_info['choice'],
-            account_info['cour'],account_info['API'],account_info['after_finish_question'],account_info['lock_screen'],account_info['speed'],account_info['task_type'],
-             account_info['homework'],account_info['pass_face'],account_info['video_title_choice'],account_info['discussion_choice'],
-             account_info.get('API_URL',''), account_info.get('API_MODEL',''),
-             bool(int(account_info.get('debug_mode', 1))),
-             bool(int(account_info.get('uxue_inject', 0))))
+        # 关键字段缺失时给出可操作提示（原实现直接下标取值，
+        # KeyError 被下面的兜底 except 变成"出错了，请查看错误日志"）
+        missing = [k for k in ('phone_number', 'password', 'choice', 'cour', 'speed')
+                   if not account_info.get(k)]
+        if missing:
+            print(color.red('❌ 配置缺少字段：' + '、'.join(missing)
+                            + '，请在设置页填写完整后重新点击「保存设置」'), flush=True)
+            return
+        main(browser, account_info.get('driver_path', '') or '',
+             account_info.get('phone_number', ''), account_info.get('password', ''),
+             account_info.get('choice', '不刷题'), account_info.get('cour', []),
+             account_info.get('API', ''),
+             account_info.get('after_finish_question', '仅自动保存'),
+             _as_int(account_info.get('lock_screen', 0)), account_info.get('speed', '1'),
+             account_info.get('task_type', '章节'),
+             account_info.get('homework', '手动选择'),
+             _as_int(account_info.get('pass_face', 0)),
+             account_info.get('video_title_choice', 'AI 智能答题'),
+             account_info.get('discussion_choice', '跳过讨论'),
+             account_info.get('API_URL', ''), account_info.get('API_MODEL', ''),
+             bool(_as_int(account_info.get('debug_mode', 1), 1)),
+             bool(_as_int(account_info.get('uxue_inject', 0), 0)))
     except NoSuchWindowException as e:
         print(color.red('❌ 窗口意外关闭'),flush=True)
     except SessionNotCreatedException as e:

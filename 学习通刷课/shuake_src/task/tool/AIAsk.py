@@ -38,21 +38,39 @@ def _load_config():
     return config
 
 
+# 「完整端点」后缀（长的在前：/chat/completions 必须先于 /completions 匹配）。
+# 用户从中转站文档/控制台复制地址时常常带这些后缀，必须剥掉再交给
+# OpenAI SDK，否则 SDK 会自动再拼一次 /chat/completions 得到
+# /v1/responses/chat/completions 这类 404 地址。
+ENDPOINT_SUFFIXES = ('/chat/completions', '/responses', '/completions')
+
+
+def strip_endpoint(url):
+    """把「完整端点」地址还原成 base；本来就是 base 的原样返回。
+
+    packyapi 等中转站文档给的是 `https://www.packyapi.ai/v1/responses`
+    （OpenAI Responses API），本工具实际走 /chat/completions，剥掉后缀后
+    两者等价；/v1/chat/completions 同理。
+    """
+    base = (url or '').strip().rstrip('/')
+    for suffix in ENDPOINT_SUFFIXES:
+        if base.lower().endswith(suffix):
+            return base[:-len(suffix)].rstrip('/')
+    return base
+
+
 def get_api_url(api_url=None):
     """规范化 API 地址（OpenAI 兼容接口通用）：
     - 去首尾空白与尾部斜杠；
-    - 若误填了完整端点（以 /chat/completions 结尾）则剥掉该后缀，
-      避免与 OpenAI SDK 的自动拼接叠加成 /chat/completions/chat/completions
-      而得到 404 接口不存在"""
+    - 若误填了完整端点（/chat/completions、/responses、/completions 结尾）
+      则剥掉该后缀（见 strip_endpoint），避免与 OpenAI SDK 的自动拼接
+      叠加成 /chat/completions/chat/completions 而得到 404 接口不存在"""
     if api_url:
         url = api_url.strip()
     else:
         config = _load_config()
         url = config.get('API_URL', '').strip()
-    url = url.rstrip('/')
-    if url.lower().endswith('/chat/completions'):
-        url = url[:-len('/chat/completions')].rstrip('/')
-    return url or DEFAULT_API_URL
+    return strip_endpoint(url) or DEFAULT_API_URL
 
 
 def get_model_list(api_url=None, api_key=None):
@@ -251,7 +269,8 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
     if answer is None:
         print(color.red(f'AI 请求失败：{last_err}'), flush=True)
         print(color.red(f'（实际请求 base_url={api_url}，模型={model}；'
-                        f'若你填的是完整端点 /chat/completions 结尾，程序已自动剥去该后缀，'
+                        f'若你填的是完整端点（/chat/completions、/responses、'
+                        f'/completions 结尾），程序已自动剥去该后缀，'
                         f'SDK 请求时会自动补回，两种填法等价；'
                         f'若反复失败请检查 API key 是否有效、账户是否有余额）'), flush=True)
         return '[]'

@@ -3,6 +3,8 @@ import glob
 import hashlib
 import re
 import os
+import shutil
+import tempfile
 import time
 from xml.dom.minidom import parse
 
@@ -88,8 +90,11 @@ class DecodeSecret:
     """
 
     def _setSecretDict(self, fontFace):
-        ttf_temp_path = ".temp.ttf"  # 临时文件 temp.ttf 存放路径
-        xml_temp_path = ".temp.xml"  # 临时文件 temp.xml 存放路径
+        # 临时文件放独立临时目录：避免异常时残留 cwd，也避免多个刷课进程
+        # 并发写同名 .temp.ttf/.temp.xml 互相覆盖
+        tmp_dir = tempfile.mkdtemp(prefix='xuexitong_font_')
+        ttf_temp_path = os.path.join(tmp_dir, "temp.ttf")
+        xml_temp_path = os.path.join(tmp_dir, "temp.xml")
 
         # 将 fontFace 解析为 temp.ttf 文件，再把temp.ttf 文件解析为 temp.xml 文件
         b = base64.b64decode(fontFace)
@@ -113,30 +118,42 @@ class DecodeSecret:
                 sf.write(b)
         except Exception:
             pass  # 样本留档失败不影响解密主流程
-        with open(ttf_temp_path, "wb") as f:
-            f.write(b)
-        font = TTFont(ttf_temp_path)
-        font.saveXML(xml_temp_path)
+        try:
+            with open(ttf_temp_path, "wb") as f:
+                f.write(b)
+            font = TTFont(ttf_temp_path)
+            font.saveXML(xml_temp_path)
+            try:
+                font.close()
+            except Exception:
+                pass
 
-        # 将字的十进制code和字形信息映射在 self._secret_dict 中
-        domTree = parse(xml_temp_path)
-        rootNode = domTree.documentElement
-        ttglyph_list = rootNode.getElementsByTagName("TTGlyph")
-        for ttglyph in ttglyph_list:
-            name = ttglyph.getAttribute('name')
-            if name == ".notdef":
-                continue
-            code = int(re.findall("uni(.*)", name)[0], 16)  # 10进制的值
-            ttglyphStr = ""
-            contour_list = ttglyph.getElementsByTagName("contour")
-            for contour in contour_list:
-                ttglyphStr += contour.toxml()
-            value = hashlib.md5(ttglyphStr.encode(encoding="utf-8")).hexdigest()
-            self._secret_dict[code] = value
-
-        # 删除临时文件
-        os.remove(ttf_temp_path)
-        os.remove(xml_temp_path)
+            # 将字的十进制code和字形信息映射在 self._secret_dict 中
+            domTree = parse(xml_temp_path)
+            rootNode = domTree.documentElement
+            ttglyph_list = rootNode.getElementsByTagName("TTGlyph")
+            for ttglyph in ttglyph_list:
+                name = ttglyph.getAttribute('name')
+                if name == ".notdef":
+                    continue
+                # 字体里可能存在非 uniXXXX 命名字形（glyph00001 / cidXX 等），
+                # 原写法直接取 findall 结果会 IndexError，导致整份测验不再作答
+                hex_codes = re.findall(r"uni(.*)", name)
+                if not hex_codes:
+                    continue
+                try:
+                    code = int(hex_codes[0], 16)  # 10进制的值
+                except ValueError:
+                    continue
+                ttglyphStr = ""
+                contour_list = ttglyph.getElementsByTagName("contour")
+                for contour in contour_list:
+                    ttglyphStr += contour.toxml()
+                value = hashlib.md5(ttglyphStr.encode(encoding="utf-8")).hexdigest()
+                self._secret_dict[code] = value
+        finally:
+            # 临时文件必删（原写法在解析异常时会永久残留在 cwd）
+            shutil.rmtree(tmp_dir, ignore_errors=True)
 
     """
     函数功能：读取 font_dict.txt 中的数据

@@ -15,8 +15,26 @@ import os
 import pickle
 import time
 
-CONFIG_PATH = r'task/tool/account_info.json'
-RECORD_DIR = r'task/record'
+def _root():
+    """项目根目录（含 task/ 的那一层）。
+
+    优先当前工作目录，其次源码目录——与 qt_ui._path 的解析规则一致。
+    原实现用相对路径 r'task/tool/...'，从非项目目录启动 GUI（快捷方式、
+    IDE 运行配置、cd /tmp && python .../qt_ui.py）时导入/导出/题库会
+    落到别处或读不到数据。
+    """
+    cwd = os.getcwd()
+    if os.path.isdir(os.path.join(cwd, 'task')):
+        return cwd
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+def _config_path():
+    return os.path.join(_root(), 'task', 'tool', 'account_info.json')
+
+
+def _record_dir():
+    return os.path.join(_root(), 'task', 'record')
 
 
 def _now():
@@ -24,7 +42,7 @@ def _now():
 
 
 def export_config():
-    with open(CONFIG_PATH, 'r', encoding='utf-8') as f:
+    with open(_config_path(), 'r', encoding='utf-8') as f:
         return {'kind': 'config', 'version': 1, 'exported_at': _now(),
                 'config': json.load(f)}
 
@@ -32,7 +50,7 @@ def export_config():
 def export_bank():
     bank = {}
     skipped = 0
-    for p in glob.glob(os.path.join(RECORD_DIR, 'cache_*.pkl')):
+    for p in glob.glob(os.path.join(_record_dir(), 'cache_*.pkl')):
         key = os.path.basename(p)[len('cache_'):-len('.pkl')]
         try:
             with open(p, 'rb') as f:
@@ -70,7 +88,9 @@ def _apply_bank(bank):
             skipped_expired += 1
             continue
         try:
-            with open(os.path.join(RECORD_DIR, f'cache_{key}.pkl'), 'wb') as f:
+            record_dir = _record_dir()
+            os.makedirs(record_dir, exist_ok=True)
+            with open(os.path.join(record_dir, f'cache_{key}.pkl'), 'wb') as f:
                 pickle.dump({'value': cache_data.get('value'), 'expire': expire}, f)
             restored += 1
         except Exception:
@@ -78,10 +98,42 @@ def _apply_bank(bank):
     return restored, skipped_expired
 
 
+def _to_int(value, default=0):
+    """容错转 int：兼容 1/0、'1'/'0'、'True'/'False'、''、None"""
+    if isinstance(value, bool):
+        return int(value)
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        low = str(value).strip().lower()
+        if low in ('true', 'yes', 'on'):
+            return 1
+        if low in ('false', 'no', 'off', ''):
+            return 0
+        return default
+
+
+def _normalize_config(config):
+    """归一化导入配置的字段类型。
+
+    备份可能来自旧版（布尔写成 'True'/'False'）或手工编辑：直接写盘会让
+    GUI 侧 int() 转换抛 ValueError（下次启动即崩），这里统一落成 int/str。
+    """
+    fixed = dict(config)
+    for key, default in (('pass_face', 0), ('lock_screen', 0), ('debug_mode', 1),
+                         ('uxue_inject', 0), ('radio_var', 1)):
+        if key in fixed:
+            fixed[key] = _to_int(fixed[key], default)
+    if fixed.get('speed') is not None:
+        fixed['speed'] = str(fixed['speed'])
+    return fixed
+
+
 def _apply_config(config):
     if not isinstance(config, dict) or not config:
         raise ValueError('文件中缺少有效的 config 数据')
-    with open(CONFIG_PATH, 'w', encoding='utf-8') as f:
+    config = _normalize_config(config)
+    with open(_config_path(), 'w', encoding='utf-8') as f:
         json.dump(config, f, ensure_ascii=False, indent=2)
     return True
 
