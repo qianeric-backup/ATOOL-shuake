@@ -22,6 +22,8 @@ MAX_EXAM_ATTEMPTS = 2
 _exam_attempts = {}
 # 正在自动作答的做题页数量: course_runner 据此暂停推进课时
 _exam_active = 0
+# 已成功作答过的做题页(标识集合): 再次弹出时直接关闭, 不重复作答
+_completed_exams = set()
 
 
 def exam_in_progress() -> bool:
@@ -61,6 +63,14 @@ async def _handle_new_page(page, ai_cfg, submit) -> None:
             return
         logger.event("平时测试已弹出, 进入自动做题", 地址=page.url[:120])
         key = _exam_key(page.url)
+        if key in _completed_exams:
+            logger.event("该平时测试此前已作答完成, 关闭页面继续刷课",
+                         地址=page.url[:120])
+            try:
+                await page.close()
+            except Exception:
+                pass
+            return
         attempts = _exam_attempts.get(key, 0)
         if attempts >= MAX_EXAM_ATTEMPTS:
             logger.warn(
@@ -88,6 +98,8 @@ async def _handle_new_page(page, ai_cfg, submit) -> None:
                     shift=True)
             else:
                 _exam_attempts.pop(key, None)
+                _completed_exams.add(key)   # 记下已完成, 不再重复作答
+                logger.event("平时测试作答完成", 已答=answered)
             logger.event("做题页处理完成, 关闭并返回刷课", shift=True)
         finally:
             try:

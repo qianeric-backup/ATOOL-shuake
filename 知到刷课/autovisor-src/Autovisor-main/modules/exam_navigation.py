@@ -35,14 +35,43 @@ EXAM_FINISH_TIMEOUT_S = 1200
 
 
 def _item_selectors(catalog) -> tuple[str, ...]:
-    """目录条目选择器(不限定 hasvideo, 以便覆盖测试任务点)。"""
+    """目录条目选择器(不限定 hasvideo, 以便覆盖测试任务点)。
+
+    "平时测试"任务点的真实结构(实测 studyvideoh5 legacy 课程页):
+        <li class="chapter-test" title="点击测试">
+          <span class="name">平时测试 <span class="iconfont icon...-zhangceshi-..."/></span>
+        </li>
+    它与视频课时 li.clearfix.video 是**同级**的独立条目, 旧实现只扫
+    .clearfix.video/.clearfix 所以永远找不到它, 也就无法自动进入测试。
+    """
     if catalog.name == "fusion":
-        return (".chapter-content-second",)
+        return (".chapter-content-second", "li.chapter-test")
     if catalog.name == "hike":
-        return (".file-item",)
+        return (".file-item", "li.chapter-test")
     if catalog.name == "legacy":
-        return (".clearfix.video", ".clearfix")
-    return (".child-info",)
+        return ("li.chapter-test", ".clearfix.video", ".clearfix")
+    return (".child-info", "li.chapter-test")
+
+
+async def _item_title(page, lesson, catalog) -> str:
+    """取条目标题: "平时测试"这类任务点用 span.name, 其余走通用逻辑。"""
+    try:
+        cls = (await lesson.get_attribute("class")) or ""
+    except Exception:
+        cls = ""
+    if "chapter-test" in cls or "chapter-test" in (catalog.name or ""):
+        try:
+            name_loc = lesson.locator(".name").first
+            if await name_loc.count():
+                text = " ".join((await name_loc.inner_text()).split())
+                if text:
+                    return text
+        except Exception:
+            pass
+    try:
+        return await get_lesson_title(page, lesson, catalog)
+    except Exception:
+        return ""
 
 
 async def _is_finished(lesson, catalog) -> bool:
@@ -55,7 +84,12 @@ async def _is_finished(lesson, catalog) -> bool:
 
 
 async def find_pending_test_items(page, catalog, tried=()) -> list:
-    """列出未完成的测试类任务点, 返回 [(标题, locator), ...]。"""
+    """列出未进入过的测试类任务点, 返回 [(标题, locator), ...]。
+
+    去重靠元素上的标记(data-av-entered): 同一门课可能有多个标题都叫
+    "平时测试"的章节任务点, 按标题去重会漏掉后面的;
+    tried 只用于记录"点了但没成功"的标题, 避免反复点同一个坏条目。
+    """
     found = []
     for selector in _item_selectors(catalog):
         try:
@@ -66,7 +100,13 @@ async def find_pending_test_items(page, catalog, tried=()) -> list:
         for index in range(total):
             lesson = items.nth(index)
             try:
-                title = await get_lesson_title(page, lesson, catalog)
+                entered = await lesson.get_attribute("data-av-entered")
+            except Exception:
+                entered = None
+            if entered == "1":
+                continue
+            try:
+                title = await _item_title(page, lesson, catalog)
             except Exception:
                 continue
             if not title or title in tried:
@@ -79,6 +119,14 @@ async def find_pending_test_items(page, catalog, tried=()) -> list:
         if found:
             break
     return found
+
+
+async def _mark_entered(lesson) -> None:
+    """给已进入过的任务点打标记, 防止下一轮重复点击。"""
+    try:
+        await lesson.evaluate("el => { el.dataset.avEntered = '1'; }")
+    except Exception:
+        pass
 
 
 async def _answer_inline(page, logger, ai_cfg, submit) -> str:
@@ -159,18 +207,26 @@ async def enter_pending_tests(page, catalog, config, logger, *, ai_cfg=None,
         if not items:
             break
         title, lesson = items[0]
-        tried.add(title)
         logger.info(f'发现未完成的测试任务点:「{title}」, 正在进入并自动作答…', shift=True)
         logger.event("进入平时测试", 标题=title)
         try:
             await lesson.click(timeout=LEARN_CLICK_TIMEOUT_MS)
         except Exception as exc:
+            tried.add(title)   # 点不动的条目记下来, 避免反复尝试
             logger.warn(f'点击测试任务点「{title}」失败: {exc}', shift=True)
             logger.event("进入平时测试", 标题=title, 结果="点击失败")
             continue
+        # 进入过就打标记: 同一门课可能有多个同名"平时测试", 靠元素标记逐个处理
+        await _mark_entered(lesson)
         result = await _wait_and_answer(page, logger, ai_cfg, submit)
         logger.event("平时测试结果", 标题=title, 结果=result)
         logger.info(f'测试任务点「{title}」处理结果: {result}', shift=True)
         handled += 1
+        if result != "新标签做题完成":
+            # 没成功打开/完成: 允许下次重试(去掉标记)
+            try:
+                await lesson.evaluate("el => { delete el.dataset.avEntered; }")
+            except Exception:
+                pass
         await page.wait_for_timeout(1500)
     return handled

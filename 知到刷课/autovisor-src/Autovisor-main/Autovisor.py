@@ -468,6 +468,7 @@ async def main(config) -> bool:
                 outcome = await run_course(
                     page, catalog, config, logger, playback_enabled,
                     ai_cfg=exam_ai_cfg, exam_submit=exam_submit,
+                    course_url=course_url,
                 )
                 playback_enabled.clear()
                 logger.event("课程结果", 结果=outcome.value, 目录类型=catalog.name)

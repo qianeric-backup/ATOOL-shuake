@@ -30,6 +30,36 @@ class CourseOutcome(Enum):
 # 等待"平时测试自动作答"结束的上限(秒): 做完整套题可能较久, 但不该无限等
 EXAM_WAIT_LIMIT_S = 900
 
+# 课程播放页的域名特征(用于判断页面是否被跳走)
+COURSE_HOST_MARKS = ("studyvideoh5", "onlinestuh5", "fusioncourseh5", "hike.zhihuishu")
+
+
+async def _ensure_on_course_page(page: Page, course_url: str, logger) -> bool:
+    """页面若被跳到登录/验证页等, 重新打开课程页并继续。
+
+    实测: 播放中页面可能被平台跳走(登录态失效/安全验证), 之后整轮刷课卡在
+    "页面未找到元素 video" 上不再推进 —— 这里做一次自愈重试。
+    """
+    try:
+        url = page.url or ""
+    except Exception:
+        return False
+    if any(mark in url for mark in COURSE_HOST_MARKS):
+        return True
+    logger.warn(f"页面已离开课程页({url[:100]}), 尝试重新打开课程…", shift=True)
+    logger.event("页面跳转", 地址=url[:120])
+    if not course_url:
+        return False
+    try:
+        await page.goto(course_url, wait_until="commit", timeout=60000)
+        await page.wait_for_timeout(3000)
+    except Exception as exc:
+        logger.debug(f"重新打开课程页失败: {exc}")
+        return False
+    ok = any(mark in (page.url or "") for mark in COURSE_HOST_MARKS)
+    logger.event("重新打开课程页", 结果="成功" if ok else "失败")
+    return ok
+
 
 async def _wait_exam_idle(page: Page, logger) -> None:
     """有平时测试正在自动作答时, 先等它结束再操作课程目录。
@@ -82,6 +112,7 @@ async def run_course(
     playback_enabled,
     ai_cfg=None,
     exam_submit=False,
+    course_url="",
 ) -> CourseOutcome:
     await page.wait_for_selector(
         catalog.item, state="attached", timeout=CATALOG_ATTACH_TIMEOUT_MS
@@ -126,6 +157,16 @@ async def run_course(
     for index, lesson in enumerate(lessons):
         position = f"{index + 1}/{len(lessons)}"
         playback_enabled.clear()
+        # 页面被跳走(登录失效/安全验证)时先自愈回到课程页, 否则整轮会卡死
+        if not await _ensure_on_course_page(page, course_url, logger):
+            lesson_fail_streak += 1
+            logger.warn(f"页面不在课程页且重开失败(连续第 {lesson_fail_streak} 次)",
+                        shift=True)
+            if lesson_fail_streak >= 3:
+                logger.error("连续 3 次无法回到课程页, 终止本课程")
+                logger.event("课程结果", 结果="页面失效", 序号=position)
+                return CourseOutcome.FAILED
+            continue
         # 若有平时测试正在自动作答, 先等它结束: 做题页会占用主页面/目录,
         # 此时点课时必然激活超时(实测会把整个课程误判为失败)
         await _wait_exam_idle(page, logger)
@@ -192,7 +233,22 @@ async def run_course(
         )
         lesson_start = time.time()
         page.set_default_timeout(10000)
-        await page.wait_for_selector("video", state="attached")
+        # 该课时可能不是视频(例如误点到任务点), 或页面已跳走: 超时就跳过本课时,
+        # 不要把整门课拖死(实测会卡在"页面未找到元素 video"几分钟不推进)
+        try:
+            await page.wait_for_selector("video", state="attached", timeout=15000)
+        except Exception:
+            lesson_fail_streak += 1
+            logger.warn(
+                f"课时 {position} 未出现视频元素(可能不是视频课时或页面已跳转), "
+                f"跳过(连续第 {lesson_fail_streak} 次)", shift=True)
+            logger.event("课时无视频元素", 序号=position,
+                         连续失败=lesson_fail_streak, 地址=(page.url or "")[:120])
+            if lesson_fail_streak >= 3:
+                logger.error("连续 3 个课时没有视频元素, 终止本课程")
+                logger.event("课程结果", 结果="无视频元素", 序号=position)
+                return CourseOutcome.FAILED
+            continue
         playback_enabled.set()
 
         if learning:
