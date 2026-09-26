@@ -178,6 +178,28 @@ def extract_whl(whl_path, extract_to):
         logger.info(f"已将 {whl_path} 解压到: {extract_to}")
 
 
+def _remove_path(path) -> bool:
+    """删除文件/目录; 删不掉时改名让路, 返回是否已"挪走"。
+
+    Windows 上刚解压的 .pyd/.dll 常被杀软实时扫描短暂占用, 直接删除会
+    [WinError 5] 拒绝访问 —— 旧版本会因此整包安装失败, 且残缺文件残留
+    在 packages/ 里与新解压内容混在一起(表现为 No module named 'numpy.core')。
+    """
+    try:
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+        else:
+            os.remove(path)
+        return True
+    except Exception:
+        pass
+    try:
+        os.rename(path, f"{path}.old-{int(time.time())}")
+        return True
+    except Exception:
+        return False
+
+
 def clear_package_files(package, extract_to):
     package_patterns = {
         "numpy": ("numpy", "numpy.libs", "numpy-*.dist-info"),
@@ -185,10 +207,8 @@ def clear_package_files(package, extract_to):
     }
     for pattern in package_patterns[package]:
         for path in glob.glob(os.path.join(extract_to, pattern)):
-            if os.path.isdir(path):
-                shutil.rmtree(path)
-            else:
-                os.remove(path)
+            if not _remove_path(path):
+                logger.warn(f"清理旧文件失败(可能被杀软/进程占用): {path}")
 
 
 def get_system_arch():
@@ -250,8 +270,16 @@ def download_wheel(mirror_name, base_url, package_name, version=None, config_obj
                 f.write(chunk)
                 show_progress("下载进度:", current=f.tell(), total=total_size)
 
+    # 完整性校验: 残缺的 wheel 解压出来是不完整的包(例如 numpy 缺 core 子包,
+    # 之后 import cv2 会报 No module named 'numpy.core'), 这里直接判为失败
+    downloaded = os.path.getsize(whl_path)
+    if total_size and downloaded != total_size:
+        _remove_path(whl_path)
+        raise ValueError(
+            f"{package_name} 下载不完整: {downloaded}/{total_size} 字节"
+            f"(网络中断?), 已丢弃")
     if not zipfile.is_zipfile(whl_path):
-        os.remove(whl_path)
+        _remove_path(whl_path)
         raise ValueError(f"下载的 {whl_path} 不是有效的 wheel 文件,请检查镜像源响应。")
 
     logger.info(f"{whl_path} 下载完成！")
@@ -317,9 +345,19 @@ def install_package(package, version, mirrors, config_obj=config):
                 结果="失败",
                 错误=logger.summarize_exception(e),
             )
+            # 清掉本次可能留下的残缺解压结果, 避免与下次解压内容混在一起
+            # (残缺 numpy 会让 cv2 报 No module named 'numpy.core')
+            try:
+                clear_package_files(package, res_dir)
+                add_runtime_search_paths(res_dir)
+            except Exception:
+                pass
         finally:
             if wheel_path and os.path.exists(wheel_path):
-                os.remove(wheel_path)
+                try:
+                    _remove_path(wheel_path)
+                except Exception:
+                    pass
 
     logger.error(f"{package}-{version} 在所有镜像源上的处理都失败！")
     return None
