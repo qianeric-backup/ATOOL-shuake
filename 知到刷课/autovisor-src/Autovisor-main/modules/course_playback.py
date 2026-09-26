@@ -9,7 +9,7 @@ from modules.lesson_navigation import (
     lesson_progress,
     wait_for_lesson_completion,
 )
-from modules.progress import show_course_progress
+from modules.progress import show_course_progress, show_progress
 from modules.tasks import (
     has_visible_element,
     has_visible_verification,
@@ -277,9 +277,16 @@ async def learn_lesson(
                     await asyncio.sleep(1)
                     continue
 
-            show_course_progress(
-                desc="平台记录进度:", cur_time=f"{catalog_progress}%"
-            )
+            # 同样以"当前视频"的播放进度为主, 平台记录进度作为附注
+            if isinstance(current_time, (int, float)) and has_valid_duration(total_time):
+                show_progress(
+                    "视频进度:", current_time, total_time,
+                    suffix=f"{current_time:.0f}s / {total_time:.0f}s"
+                           f"  平台记录 {catalog_progress}%")
+            else:
+                show_course_progress(
+                    desc="平台记录进度:", cur_time=f"{catalog_progress}%"
+                )
             await asyncio.sleep(0.5)
         except TargetClosedError:
             return paused_time, False, False
@@ -380,11 +387,23 @@ async def review_lesson(
                 start_time, paused_before + paused_time
             ):
                 return paused_time, False, True
-            show_course_progress(
-                desc="完成进度:",
-                cur_time=elapsed_minutes(start_time, paused_before + paused_time),
-                limit_time=config.limitMaxTime,
-            )
+            # 进度条显示"当前视频"的播放进度(每个视频单独):
+            # 旧实现在 limitMaxTime=0 时把"已学分钟数"当百分比传进来, 于是
+            # 6.7 分钟被显示成 6% 并长时间停在不动, 与视频进度无关。
+            if isinstance(current_time, (int, float)) and has_valid_duration(total_time):
+                suffix = f"{current_time:.0f}s / {total_time:.0f}s"
+                if config.limitMaxTime > 0:
+                    left = round(
+                        config.limitMaxTime
+                        - elapsed_minutes(start_time, paused_before + paused_time), 1)
+                    suffix += f"  本轮剩余 {left} min"
+                show_progress("视频进度:", current_time, total_time, suffix=suffix)
+            else:
+                show_course_progress(
+                    desc="完成进度:",
+                    cur_time=elapsed_minutes(start_time, paused_before + paused_time),
+                    limit_time=config.limitMaxTime,
+                )
             await asyncio.sleep(0.5)
         except TargetClosedError:
             return paused_time, False, False
