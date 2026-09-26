@@ -20,6 +20,13 @@ EXAM_URL_MARK = "stuExamWeb.html#/webExamList/dohomework"
 MAX_EXAM_ATTEMPTS = 2
 # 已尝试过的做题页(标识 -> 次数), 进程级
 _exam_attempts = {}
+# 正在自动作答的做题页数量: course_runner 据此暂停推进课时
+_exam_active = 0
+
+
+def exam_in_progress() -> bool:
+    """是否有做题页正在自动作答(供刷课主循环避让)。"""
+    return _exam_active > 0
 
 
 def _exam_key(url: str) -> str:
@@ -31,57 +38,64 @@ def _ai_ready(cfg) -> bool:
 
 
 async def _handle_new_page(page, ai_cfg, submit) -> None:
+    # 做题页一出现就标记"正在做题": 刷课主循环据此暂停推进课时,
+    # 避免在做题期间点课时 -> 课时激活超时 -> 整门课被判失败(实测问题)
+    global _exam_active
+    _exam_active += 1
     try:
-        # 等新页 URL 稳定(stuExamWeb 弹窗会先占位再跳到 dohomework)
-        # 注意单位为秒: 这里必须短轮询, 写成 300 会让每题最长等 5 分钟
-        for _ in range(15):
-            url = ""
-            try:
-                url = page.url or ""
-            except Exception:
-                return
-            if EXAM_URL_MARK in url:
-                break
-            if "stuExamWeb" not in url and "onlineexamh5new" not in url:
-                return
-            await asyncio.sleep(0.3)
-    except Exception:
-        return
-    logger.event("平时测试已弹出, 进入自动做题", 地址=page.url[:120])
-    key = _exam_key(page.url)
-    attempts = _exam_attempts.get(key, 0)
-    if attempts >= MAX_EXAM_ATTEMPTS:
-        logger.warn(
-            f"同一套题已自动尝试 {attempts} 次仍未答上(通常是 AI 配置无效), "
-            "跳过并关闭做题页, 请手动完成该测试.", shift=True)
-        logger.event("跳过重复做题页", 地址=page.url[:120], 已尝试=attempts)
         try:
-            await page.close()
+            # 等新页 URL 稳定(stuExamWeb 弹窗会先占位再跳到 dohomework)
+            # 注意单位为秒: 这里必须短轮询, 写成 300 会让每题最长等 5 分钟
+            for _ in range(15):
+                url = ""
+                try:
+                    url = page.url or ""
+                except Exception:
+                    return
+                if EXAM_URL_MARK in url:
+                    break
+                if "stuExamWeb" not in url and "onlineexamh5new" not in url:
+                    return
+                await asyncio.sleep(0.3)
         except Exception:
-            pass
-        return
-    try:
-        result = await worker.run_exam(page, page.url, ai_cfg, submit=submit)
-    except Exception as e:
-        logger.warn("自动做题失败, 请手动完成该测试.", shift=True)
-        logger.event("做题异常", 说明=str(e)[:200])
-        _exam_attempts[key] = attempts + 1
-    else:
-        answered = len((result or {}).get("answered") or [])
-        if answered == 0:
-            # 一题都没答上: 记一次, 达到上限后不再重试同一套题
-            _exam_attempts[key] = attempts + 1
+            return
+        logger.event("平时测试已弹出, 进入自动做题", 地址=page.url[:120])
+        key = _exam_key(page.url)
+        attempts = _exam_attempts.get(key, 0)
+        if attempts >= MAX_EXAM_ATTEMPTS:
             logger.warn(
-                "本次未成功作答任何题目(请检查 AI 配置), 平台可能再次弹出该测试.",
-                shift=True)
-        else:
-            _exam_attempts.pop(key, None)
-        logger.event("做题页处理完成, 关闭并返回刷课", shift=True)
-    finally:
+                f"同一套题已自动尝试 {attempts} 次仍未答上(通常是 AI 配置无效), "
+                "跳过并关闭做题页, 请手动完成该测试.", shift=True)
+            logger.event("跳过重复做题页", 地址=page.url[:120], 已尝试=attempts)
+            try:
+                await page.close()
+            except Exception:
+                pass
+            return
         try:
-            await page.close()
-        except Exception:
-            pass
+            result = await worker.run_exam(page, page.url, ai_cfg, submit=submit)
+        except Exception as e:
+            logger.warn("自动做题失败, 请手动完成该测试.", shift=True)
+            logger.event("做题异常", 说明=str(e)[:200])
+            _exam_attempts[key] = attempts + 1
+        else:
+            answered = len((result or {}).get("answered") or [])
+            if answered == 0:
+                # 一题都没答上: 记一次, 达到上限后不再重试同一套题
+                _exam_attempts[key] = attempts + 1
+                logger.warn(
+                    "本次未成功作答任何题目(请检查 AI 配置), 平台可能再次弹出该测试.",
+                    shift=True)
+            else:
+                _exam_attempts.pop(key, None)
+            logger.event("做题页处理完成, 关闭并返回刷课", shift=True)
+        finally:
+            try:
+                await page.close()
+            except Exception:
+                pass
+    finally:
+        _exam_active = max(0, _exam_active - 1)
 
 
 async def watch_exam_pages(context, ai_cfg=None, submit=False):

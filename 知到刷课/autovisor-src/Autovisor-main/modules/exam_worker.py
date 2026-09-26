@@ -71,6 +71,23 @@ def _clean(text) -> str:
     return re.sub(r"\s+", " ", (text or "")).strip()
 
 
+def _plain_text(text) -> str:
+    """去掉题目/选项里的 HTML 标签与实体, 只留纯文本。
+
+    学习通的选项 content 会带富文本(例如 `<span style="color:#333">…`),
+    直接把它拼进 CSS 选择器会报
+    `Unexpected token "color" while parsing css selector`, 送给 AI 也干扰判断。
+    """
+    if not text:
+        return ""
+    t = str(text)
+    t = re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", t, flags=re.S | re.I)
+    t = re.sub(r"<[^>]+>", " ", t)
+    t = (t.replace("&nbsp;", " ").replace("&amp;", "&")
+          .replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", '"'))
+    return re.sub(r"\s+", " ", t).strip()
+
+
 def _load_cookie_file(path: Path, cas: dict) -> int:
     """把 cookie 文件(Playwright 导出格式)读进 cas, 返回读入条数。"""
     if not path.is_file():
@@ -274,12 +291,18 @@ async def answer_on_view(page, qinfo, ai_cfg):
     for o in options:
         if o["letter"] not in want:
             continue
-        node = block.locator(
-            f".nodeLab:has(.ABCase:text-is('{o['letter']}.'))").first
-        if await node.count() == 0:
-            node = block.locator(
-                f".nodeLab:has-text(\"{o['content'][:18]}\")").first
-        if await node.count() == 0:
+        # 依次尝试: 字母图标 → 选项文本 → input value。
+        # 注意都用 locator.filter(has_text=...) 而不是拼 :has-text("..."):
+        # 选项文本可能含引号/HTML 片段, 拼进 CSS 会解析失败
+        # (曾报 Unexpected token "color" while parsing css selector)。
+        node = block.locator(".nodeLab").filter(
+            has=block.locator(f".ABCase:text-is('{o['letter']}.')")).first
+        if await node.count() == 0 and o["content"]:
+            snippet = o["content"][:24]
+            if snippet.strip():
+                node = block.locator(".nodeLab").filter(
+                    has_text=snippet).first
+        if await node.count() == 0 and o.get("id"):
             node = block.locator(f".nodeLab input[value='{o['id']}']").first
         try:
             await node.first.click(timeout=4000)
@@ -301,20 +324,21 @@ def _normalize_questions(exam_base: dict, is_judge_detection=None) -> list:
             tname = ((q.get("questionType") or {}).get("name") or "单选")
             raw_opts = q.get("questionOptions") or []
             judge = (tname == "判断") or (
-                len(raw_opts) == 2 and any(("对" in _clean(o.get("content")))
+                len(raw_opts) == 2 and any(("对" in _plain_text(o.get("content")))
                                            for o in raw_opts) is True and
-                any(("错" in _clean(o.get("content"))) for o in raw_opts))
+                any(("错" in _plain_text(o.get("content"))) for o in raw_opts))
             opts = []
             for idx, oo in enumerate(raw_opts):
                 opts.append({
                     "id": oo.get("id"),
-                    "content": _clean(oo.get("content")),
+                    # 选项内容可能是富文本: 去标签后再用于 AI 判断与元素定位
+                    "content": _plain_text(oo.get("content")),
                     "letter": chr(65 + idx),
                 })
             blank = not raw_opts
             questions.append({
                 "eid": q.get("eid"),
-                "title": _clean(q.get("name")),
+                "title": _plain_text(q.get("name")),
                 "type": "填空" if blank else tname,
                 "isJudge": judge,
                 "options": opts,

@@ -141,9 +141,18 @@ async def enter_pending_tests(page, catalog, config, logger, *, ai_cfg=None,
 
     tried = tried if tried is not None else set()
     handled = 0
+    scanned_once = False
     for _ in range(max_items):
         try:
             items = await find_pending_test_items(page, catalog, tried)
+            if not items and not scanned_once:
+                # 记一条扫描统计, 便于判断"为什么没有自动进入平时测试"
+                scanned_once = True
+                total = 0
+                for selector in _item_selectors(catalog):
+                    total += await page.locator(selector).count()
+                logger.debug(
+                    f"测试任务点扫描: 目录条目 {total} 个, 未完成的测试类 0 个")
         except Exception as exc:
             logger.warn(f"扫描测试任务点失败: {exc}", shift=True)
             return handled

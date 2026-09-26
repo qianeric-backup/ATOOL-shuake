@@ -27,6 +27,34 @@ class CourseOutcome(Enum):
     FAILED = "failed"
 
 
+# 等待"平时测试自动作答"结束的上限(秒): 做完整套题可能较久, 但不该无限等
+EXAM_WAIT_LIMIT_S = 900
+
+
+async def _wait_exam_idle(page: Page, logger) -> None:
+    """有平时测试正在自动作答时, 先等它结束再操作课程目录。
+
+    平台弹出的做题页会占用/遮挡课程页目录, 此时点击课时必然"激活超时",
+    旧版本会因此把整门课判为失败并中断正在进行的作答。
+    """
+    try:
+        from modules.exam_integrate import exam_in_progress
+    except Exception:
+        return
+    waited = 0
+    announced = False
+    while exam_in_progress() and waited < EXAM_WAIT_LIMIT_S:
+        if not announced:
+            announced = True
+            logger.info("检测到正在自动作答的平时测试, 等它完成后再继续刷课…",
+                        shift=True)
+        await page.wait_for_timeout(2000)
+        waited += 2
+    if announced:
+        logger.event("等待平时测试结束", 等待秒数=waited, 结果=
+                     "已结束" if not exam_in_progress() else "超时继续")
+
+
 async def detect_catalog_after_verification(
     page: Page, course_url: str
 ) -> CatalogSelectors:
@@ -94,9 +122,13 @@ async def run_course(
     paused_time = 0.0
     # 已尝试过的测试任务点标题: 跨课时累计, 避免反复点击同一条目
     tried_tests = set()
+    lesson_fail_streak = 0
     for index, lesson in enumerate(lessons):
         position = f"{index + 1}/{len(lessons)}"
         playback_enabled.clear()
+        # 若有平时测试正在自动作答, 先等它结束: 做题页会占用主页面/目录,
+        # 此时点课时必然激活超时(实测会把整个课程误判为失败)
+        await _wait_exam_idle(page, logger)
         # 学习本课时前, 先处理目录里"平时测试"等非视频任务点(默认关闭时不动作)
         try:
             from modules.exam_navigation import enter_pending_tests
@@ -119,12 +151,33 @@ async def run_course(
                 目录类型=catalog.name,
                 选择器=catalog.active,
             )
-            await lesson.click(timeout=LESSON_CLICK_TIMEOUT_MS)
-            active = await wait_for_lesson_active(lesson, catalog)
+            # 重试前先等做题结束 + 刷新页面重新定位(做题页/弹窗会让目录失效)
+            await _wait_exam_idle(page, logger)
+            try:
+                await page.reload(wait_until="domcontentloaded")
+                await page.wait_for_timeout(2500)
+                refreshed = await get_filtered_class(
+                    page, catalog, include_all=not learning)
+                if len(refreshed) > index:
+                    lesson = refreshed[index]
+                await lesson.click(timeout=LESSON_CLICK_TIMEOUT_MS)
+                active = await wait_for_lesson_active(lesson, catalog)
+            except Exception as exc:
+                logger.debug(f"刷新后重试选中课时失败: {exc}")
         if not active:
-            logger.error(f"无法选中课时,目录类型: {catalog.name}")
-            logger.event("课程结果", 结果="课时无法选中", 序号=position)
-            return CourseOutcome.FAILED
+            # 单个课时选不中不应终止整门课程(做题页占用/目录重排都很常见):
+            # 跳过它继续后面的课时, 连续 3 个都失败才判定本课程失败
+            lesson_fail_streak += 1
+            logger.warn(
+                f"无法选中课时 {position}, 跳过该课时"
+                f"(连续第 {lesson_fail_streak} 次)", shift=True)
+            logger.event("课时无法选中", 序号=position, 连续失败=lesson_fail_streak)
+            if lesson_fail_streak >= 3:
+                logger.error(f"连续 3 个课时无法选中, 终止本课程(目录类型: {catalog.name})")
+                logger.event("课程结果", 结果="课时无法选中", 序号=position)
+                return CourseOutcome.FAILED
+            continue
+        lesson_fail_streak = 0
 
         await page.wait_for_timeout(1000)
         title = await get_lesson_name(page, lesson, catalog)
