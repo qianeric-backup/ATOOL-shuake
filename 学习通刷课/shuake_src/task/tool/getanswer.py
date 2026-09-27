@@ -3,19 +3,19 @@
 # This software is provided for non-commercial use only.
 # For more information, see the LICENSE file in the root directory of this project.
 
-import io
 import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from selenium.webdriver.common.by import By
 from task.tool import color
+from task.tool.console import ensure_utf8_stdout
 
 
-# 修改 stdout 编码为 UTF-8（先冲刷旧缓冲并防止重复包裹）
-sys.stdout.flush()
-if type(sys.stdout) is not io.TextIOWrapper:
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# stdout 统一 UTF-8。原写法用 `type(sys.stdout) is not io.TextIOWrapper` 判断，
+# 而正常解释器的 sys.stdout 本来就是 io.TextIOWrapper，条件恒为假、从未生效
+# （所以那条"修复"实际没起作用）。改走统一工具，详见 task/tool/console.py
+ensure_utf8_stdout()
 # 自定义文件
 class NoFoundAnswerException(Exception):
     """

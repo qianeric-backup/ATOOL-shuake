@@ -33,6 +33,13 @@ from task.tool.send_wx import send_error
 from task.do_work import do_work
 from task.exam_ai import do_exam
 from task.reading import reading
+
+# 统一 stdio 编码：Windows 下 stdout 走管道时默认 locale 编码（GBK），而 GUI
+# 按 UTF-8 解码子进程输出 —— 刷课日志/进度回显里的中文会整段丢失或乱码。
+# 父子两端编码必须一致，详见 task/tool/console.py
+from task.tool.console import ensure_utf8_stdout
+ensure_utf8_stdout()
+
 condition=True#用于判断是否调节倍数
 error_num=0#错误次数
 

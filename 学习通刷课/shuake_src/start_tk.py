@@ -851,8 +851,13 @@ class Start:
             读取 main.py 程序的输出，并将其显示在文本框中。
             """
             # 启动 main.py 程序
+            env = os.environ.copy()
+            # 子进程输出固定 UTF-8（详见 task/tool/console.py）；否则下面按
+            # UTF-8 解码会与子进程的 GBK 输出不匹配，中文日志显示成乱码
+            env['PYTHONIOENCODING'] = 'utf-8'
             self.process = subprocess.Popen(file_name,
-                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                                            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                            env=env)
             color_tag = None
             logger.info('======================主程序开始运行======================')
             while True:
@@ -863,9 +868,10 @@ class Start:
                     break
                 if output:
                     try:
-                        decoded_output = output.decode()
+                        decoded_output = output.decode('utf-8')
                     except UnicodeDecodeError:
-                        decoded_output = output.decode('gbk', errors='ignore')
+                        # 子进程已统一 UTF-8；GBK 回退仅用于旧版子进程/第三方字节流
+                        decoded_output = output.decode('gbk', errors='replace')
                     # 处理 [91m 这种颜色标记
                     ansi_color_start = re.search(r'\[(\d+?)m', decoded_output)
                     ansi_color_end = re.search(r'\[0m', decoded_output)

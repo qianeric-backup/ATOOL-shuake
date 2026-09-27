@@ -14,15 +14,15 @@ from selenium.webdriver.common.by import By
 from task.tool.no_secret import DecodeSecret
 from task.tool import color
 import sys
-import io
 from task.tool.ai_wen_da import main,AnswerAPI,Question
 from task.tool.AIAsk import AIAsk
 from task.tool.send_wx import send_error
+from task.tool.console import ensure_utf8_stdout
 
-# 设置默认编码为UTF-8（先冲刷旧缓冲并防止重复包裹导致日志丢失/句柄泄漏）
-sys.stdout.flush()
-if type(sys.stdout) is not io.TextIOWrapper:
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+# stdout 统一 UTF-8。原写法用 `type(sys.stdout) is not io.TextIOWrapper` 判断，
+# 而正常解释器的 sys.stdout 本来就是 io.TextIOWrapper，条件恒为假、从未生效
+# （所以那条"修复"实际没起作用）；详见 task/tool/console.py
+ensure_utf8_stdout()
 
 # 题型归一化：新版学习通页面在【】里输出英文题型标记
 # （如 TrueorFalse / SingleChoice / MultipleChoice / ShortAnswer / Completion），

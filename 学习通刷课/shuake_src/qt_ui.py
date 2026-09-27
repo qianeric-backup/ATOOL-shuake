@@ -1651,9 +1651,15 @@ class StartWindow(QMainWindow):
 
     def run_program(self, cmd):
         """启动 main.py 子进程并实时读取输出显示到日志框（后台线程）"""
+        # 子进程输出固定 UTF-8：Windows 下 Python 的 stdout 走管道时默认用
+        # locale 编码（GBK），与下面按 UTF-8 解码不匹配 —— 刷课日志/进度回显
+        # 里的中文会整段丢失或乱码。与 task/tool/console.py 双保险
+        env = os.environ.copy()
+        env['PYTHONIOENCODING'] = 'utf-8'
         try:
             proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                env=env,
                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0,
                 cwd=_APP_DIR,
                 # 关键：让子进程独立成新会话/进程组。否则它与 GUI 及
@@ -1675,7 +1681,7 @@ class StartWindow(QMainWindow):
                 if not line and proc.poll() is not None:
                     break
                 if line:
-                    text = self._strip_ansi(line.decode('utf-8', errors='ignore'))
+                    text = self._strip_ansi(self._decode_child_output(line))
                     self.log_signal.emit(text)   # 跨线程经信号写 UI，禁止直调 QTextEdit
         except Exception:
             pass
@@ -1693,6 +1699,22 @@ class StartWindow(QMainWindow):
             if self.process_condition:
                 self.log_signal.emit('\n刷课子进程已结束')
             self.program_finished.emit()   # 子进程结束，恢复「开始刷课」按钮
+
+    @staticmethod
+    def _decode_child_output(raw):
+        """解码子进程输出。
+
+        子进程已由 PYTHONIOENCODING=utf-8（见 run_program）与
+        task/tool/console.py 统一为 UTF-8；这里保留 GBK 回退，以覆盖旧版
+        子进程、或第三方库绕过 sys.stdout 直接写字节的情况。按行解码是安全的：
+        UTF-8 与 GBK 的多字节序列都不含 0x0A，不会被行尾截断。
+        """
+        try:
+            text = raw.decode('utf-8')
+        except UnicodeDecodeError:
+            text = raw.decode('gbk', errors='replace')
+        # 统一换行，避免 '\r' 在 QTextEdit 里显示成异常字符
+        return text.replace('\r\n', '\n').replace('\r', '\n')
 
     @staticmethod
     def _strip_ansi(text):
