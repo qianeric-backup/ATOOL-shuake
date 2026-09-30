@@ -57,8 +57,16 @@ EOF
 # 3. 打包（onefile，产物 dist/学习通刷课.exe）
 cd src && wine "$PY" -m PyInstaller "学习通刷课.spec" --noconfirm --clean
 
-# 4. 归档产物
-cd .. && mkdir -p ../dist && cp src/dist/学习通刷课.exe ../dist/学习通刷课.exe
+# 4. 归档产物（spec 产物为 ASCII 名 xuexitongshuake.exe；兼容旧中文名）
+cd .. && mkdir -p ../dist
+if [ -f src/dist/xuexitongshuake.exe ]; then
+    cp src/dist/xuexitongshuake.exe ../dist/学习通刷课.exe
+elif [ -f src/dist/学习通刷课.exe ]; then
+    cp src/dist/学习通刷课.exe ../dist/学习通刷课.exe
+else
+    echo "错误：未找到打包产物" >&2
+    exit 1
+fi
 echo "完成：学习通刷课/dist/学习通刷课.exe"
 
 # 5.（可选）wine 试运行验证：直接跑会因 wine↔XFCE 窗管交互卡死，
