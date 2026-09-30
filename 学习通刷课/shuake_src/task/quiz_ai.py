@@ -11,6 +11,7 @@ import traceback
 
 from selenium.common import NoSuchElementException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
 from task.tool.no_secret import DecodeSecret
 from task.tool import color
 import sys
@@ -189,6 +190,47 @@ class Answer:
                 return [raw.strip()] if raw.strip() else []
         return raw
 
+    def _click_option(self, li_element, desc):
+        """遮挡安全点击。
+
+        学习通答题页有悬浮遮罩/提示条，原生 .click() 会被判定为
+        element click intercepted（日志：not clickable at point (452, ...)）。
+        策略：先 scrollIntoView 居中 → JS 直接派发 click（绕过 Selenium
+        可点击性判定）→ 校验 aria-checked 是否生效；未生效再用
+        ActionChains 真实鼠标事件链（部分选项绑定 mouseup 才响应）兜底。
+        """
+        # 1) 滚动到视口中央，确保元素可见且坐标有效
+        try:
+            self.driver.execute_script(
+                "arguments[0].scrollIntoView({block:'center'});", li_element)
+            time.sleep(0.3)
+        except Exception:
+            pass
+        # 2) JS 直点（不受遮挡影响）
+        try:
+            self.driver.execute_script("arguments[0].click();", li_element)
+        except Exception:
+            return False
+        time.sleep(0.4)
+        if li_element.get_attribute('aria-checked') == 'true':
+            return True
+        # 3) 校验未通过：真实鼠标事件链兜底（覆盖 onmouseup 绑定选项）
+        try:
+            ActionChains(self.driver).move_to_element(li_element).click().perform()
+        except Exception:
+            pass
+        time.sleep(0.4)
+        if li_element.get_attribute('aria-checked') == 'true':
+            return True
+        print(color.yellow(f'{desc} 点击后未确认选中，尝试强制点击'), flush=True)
+        try:
+            self.driver.execute_script(
+                "arguments[0].click(); arguments[0].dispatchEvent("
+                "new MouseEvent('click', {bubbles: true}));", li_element)
+        except Exception:
+            pass
+        return li_element.get_attribute('aria-checked') == 'true'
+
     def use_ai_wen_da(self):
         for i in self.all_title_dit.keys():
             if self.times==0 and self.work_choice!='随机答题':
@@ -292,7 +334,8 @@ class Answer:
                 if self.all_optionWebElementList[title_num][option_num].get_attribute('aria-checked')== 'true':
                     print(color.red('已回答，无需重复回答'),flush=True)
                 else:
-                    self.all_optionWebElementList[title_num][option_num].click()
+                    self._click_option(self.all_optionWebElementList[title_num][option_num],
+                                       f'第{title_num+1}题选项{option_num+1}')
                 return True
             elif self.questionType_list[title_num] == '多选题':
                 self.answer_num=[]
@@ -313,9 +356,14 @@ class Answer:
                         if self.all_optionWebElementList[title_num][ans].get_attribute('aria-checked')== 'true':
                             print(color.red('已回答，无需重复回答'), flush=True)
                         else:
-                            self.all_optionWebElementList[title_num][ans].click()
-                    except:
-                        self.all_optionWebElementList[title_num][ans].click()
+                            self._click_option(self.all_optionWebElementList[title_num][ans],
+                                               f'第{title_num+1}题选项{ans+1}')
+                    except Exception:
+                        try:
+                            self.driver.execute_script(
+                                "arguments[0].click();", self.all_optionWebElementList[title_num][ans])
+                        except Exception:
+                            pass
                 return True
 
             elif self.questionType_list[title_num] in ('简答题', '论述题', '名词解释', '计算题'):

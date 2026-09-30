@@ -286,8 +286,13 @@ class AnswerAPI:
         try:
             start_time = time.time()
 
-            # 发送 GET 请求
-            response = requests.get(base_url, params=params, timeout=10)
+            # 发送 GET 请求；服务端 5xx（如 567）多为瞬时故障，快速重试一次
+            response = None
+            for _attempt in range(2):
+                response = requests.get(base_url, params=params, timeout=10)
+                if response.status_code < 500:
+                    break
+                await asyncio.sleep(0.8)
 
             # 检查 HTTP 状态码
             response.raise_for_status()

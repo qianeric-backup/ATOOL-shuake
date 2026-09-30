@@ -19,6 +19,32 @@ from selenium.webdriver.common.by import By
 import itertools
 
 
+def safe_click_option(driver, option, desc=''):
+    """遮挡安全点击（视频内嵌题目同样会被悬浮层拦截）。
+
+    JS 直点绕过 Selenium 可点击性判定；校验 [checked] 状态未生效时
+    用 ActionChains 真实鼠标事件链兜底。
+    """
+    try:
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", option)
+        time.sleep(0.3)
+    except Exception:
+        pass
+    try:
+        driver.execute_script("arguments[0].click();", option)
+    except Exception:
+        return False
+    time.sleep(0.4)
+    if option.find_elements(By.CSS_SELECTOR, '[checked="checked"]'):
+        return True
+    try:
+        ActionChains(driver).move_to_element(option).click().perform()
+    except Exception:
+        pass
+    time.sleep(0.4)
+    return bool(option.find_elements(By.CSS_SELECTOR, '[checked="checked"]'))
+
+
 def generate_combinations_list(input_list):
     """
     返回列表形式的组合，完整组合放在第一位
@@ -59,7 +85,7 @@ def get_answer(API,question,typ,api_url='',api_model=''):
     except Exception as e:
         print(f'答题时出错了{e}',flush=True)
     return answer
-def finish_video_question(options_txt,options,answer,question_type):
+def finish_video_question(driver, options_txt, options, answer, question_type):
     answer_num = []
     option_num = 0
     if question_type == '单选题' or question_type == '判断题':
@@ -88,7 +114,7 @@ def finish_video_question(options_txt,options,answer,question_type):
     for ans in answer_num:
         checked=options[ans].find_elements(By.CSS_SELECTOR,'[checked="checked"]')
         if not checked:
-            options[ans].click()
+            safe_click_option(driver, options[ans], f'视频题目选项{ans+1}')
             time.sleep(1)
         else:
             print(color.yellow(f'已选择选项{ans}'), flush=True)
@@ -117,7 +143,7 @@ def check_video_question(driver,API,video_title_choice,api_url='',api_model=''):
                 print(color.red(f'答题失败,无答案'), flush=True)
                 return
             else:
-                finish_video_question(options_txt,options,answer,question_type)
+                finish_video_question(driver, options_txt, options, answer, question_type)
                 submit.click()
         #随机答题：仅随机模式进入，AI 模式已提交的答案不能被轮点覆盖
         elif video_title_choice == '随机答题':
