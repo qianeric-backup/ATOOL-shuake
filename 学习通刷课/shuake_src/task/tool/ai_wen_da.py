@@ -11,6 +11,17 @@ import os
 import asyncio
 import ast
 from task.tool.AIAsk import AIAsk
+from task.tool import color
+
+# 免费题库3（webapi.zaizhexue.top）熔断状态：连续 5xx（如 567）说明
+# 服务不可用，重试只会让每道题白等。达阈值后本轮进程内跳过该源，
+# 立即走 AI 兜底；熔断中每 PROBE_INTERVAL 题半开探测一次，服务器恢复
+# 即复位熔断；任一请求成功也会复位计数。
+_ZAOZHE_CIRCUIT_OPEN = False
+_ZAOZHE_CONSECUTIVE_5XX = 0
+_ZAOZHE_THRESHOLD = 3
+_ZAOZHE_PROBE_INTERVAL = 5
+_ZAOZHE_PROBE_COUNTER = 0
 
 
 @dataclass
@@ -272,6 +283,16 @@ class AnswerAPI:
         :param your_token: 你的 API Token
         :return: 解析后的 JSON 数据或错误信息
         """
+        global _ZAOZHE_CIRCUIT_OPEN, _ZAOZHE_CONSECUTIVE_5XX, _ZAOZHE_PROBE_COUNTER
+        if _ZAOZHE_CIRCUIT_OPEN:
+            _ZAOZHE_PROBE_COUNTER += 1
+            if _ZAOZHE_PROBE_COUNTER % _ZAOZHE_PROBE_INTERVAL != 0:
+                # 熔断中：跳过请求，避免每道题都白打一次死服务器
+                return AnswerResult(form="免费题库3",
+                                    answer=[],
+                                    duration=0,
+                                    msg="已熔断(服务异常，跳过)")
+            # half-open：每 PROBE_INTERVAL 题探一次，服务器恢复即复位
         # API 的基础地址
         base_url = "https://webapi.zaizhexue.top/search"
 
@@ -287,13 +308,19 @@ class AnswerAPI:
         try:
             start_time = time.time()
 
-            # 发送 GET 请求；服务端 5xx（如 567）多为瞬时故障，快速重试一次
+            # 发送 GET 请求；服务端 5xx（如 567）多为服务不可用，
+            # 快速重试一次但不再 sleep 等待（连续 5xx 由熔断器接管）
             response = None
             for _attempt in range(2):
                 response = requests.get(base_url, params=params, timeout=10)
                 if response.status_code < 500:
                     break
-                await asyncio.sleep(0.8)
+            if response.status_code < 500:
+                # 服务器存活：复位熔断计数（熔断状态由成功请求解除）
+                _ZAOZHE_CONSECUTIVE_5XX = 0
+                if _ZAOZHE_CIRCUIT_OPEN:
+                    _ZAOZHE_CIRCUIT_OPEN = False
+                    print(color.green('免费题库3 服务已恢复，熔断解除'), flush=True)
 
             # 检查 HTTP 状态码
             response.raise_for_status()
@@ -337,6 +364,14 @@ class AnswerAPI:
                 msg="请求失败"
             )
         except requests.exceptions.RequestException as e:
+            # 5xx 连续计数，达阈值打开熔断（后续题目直接跳过该源）
+            code = getattr(getattr(e, 'response', None), 'status_code', None) or 0
+            if code >= 500:
+                _ZAOZHE_CONSECUTIVE_5XX += 1
+                if _ZAOZHE_CONSECUTIVE_5XX >= _ZAOZHE_THRESHOLD:
+                    _ZAOZHE_CIRCUIT_OPEN = True
+                    print(color.red('免费题库3 服务连续异常（567），本轮已熔断该源，'
+                                    '后续题目直接走 AI 搜题'), flush=True)
             print(f"请求过程中发生错误：{e}")
             return AnswerResult(
                 form="免费题库",
