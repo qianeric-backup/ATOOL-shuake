@@ -30,7 +30,9 @@ def _root():
 
 
 def _config_path():
-    return os.path.join(_root(), 'task', 'tool', 'account_info.json')
+    # 与全项目统一：打包态=exe 同级 task/tool/account_info.json（持久化）
+    from task.tool.config_path import get_config_path
+    return get_config_path()
 
 
 def _record_dir():

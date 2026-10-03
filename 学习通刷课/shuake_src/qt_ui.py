@@ -65,11 +65,16 @@ def _strip_endpoint(url):
 
 
 # ---------------------------------------------------------------- 常量 ----
-ACCOUNT_FILE = _path('task', 'tool', 'account_info.json')
+# 配置文件统一走 task.tool.config_path：打包态=exe 同级 task/tool/account_info.json
+# （持久化，重启保留；缺失时启动自动生成空白模板）；源码态=cwd 下同一相对路径
+from task.tool.config_path import get_config_path, ensure_config
+ACCOUNT_FILE = get_config_path()
 COURSE_FILE = _path('task', 'tool', 'course_name.json')
 HELP_FILE = _path('task', 'tool', 'Help.txt')
 ERROR_LOG = _path('error.log')
 VERSION_FILE = _path('task', 'tool', 'version_info')
+# 首启/目录无配置：先生成空白模板（用户填写后持久化到 exe 同级）
+ensure_config()
 
 # 配色方案（与原版 color_value_dict 一致）
 # 每个方案为 [按钮/文字色(primary), 页面背景(light), 悬停/次要背景(mid)]
@@ -97,16 +102,15 @@ LEGACY_AI_OPTION = 'DeepSeek AI'
 
 
 def load_account():
-    try:
-        with open(ACCOUNT_FILE, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+    # 统一走 config_path（持久化路径 + 缺失自动生成空白模板）
+    from task.tool.config_path import load_config
+    return load_config()
 
 
 def save_account(data):
-    with open(ACCOUNT_FILE, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    # 统一走 config_path（exe 同级持久化，重启保留）
+    from task.tool.config_path import save_config
+    save_config(data)
 
 
 def load_course_names():

@@ -27,15 +27,14 @@ _preferred_channel = None
 
 
 def _load_config():
-    """从 account_info.json 读取 API 配置"""
-    config = {}
-    try:
-        path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'tool', 'account_info.json')
-        with open(path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-    except Exception:
-        pass
-    return config
+    """从 account_info.json 读取 API 配置。
+
+    统一走 task.tool.config_path（持久化路径：打包态为 exe 同级
+    task/tool/account_info.json；源码态为 cwd 下）。旧实现按 __file__
+    定位，打包后指向 _MEIPASS 只读临时目录，用户填的配置读不到。
+    """
+    from task.tool.config_path import load_config
+    return load_config()
 
 
 # 「完整端点」后缀（长的在前：/chat/completions 必须先于 /completions 匹配）。
