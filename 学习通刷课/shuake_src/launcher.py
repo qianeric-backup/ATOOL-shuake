@@ -52,6 +52,13 @@ def extract_resources():
             if os.path.isdir(s):
                 os.makedirs(d, exist_ok=True)
                 sync(s, d)
+            elif name == 'account_info.json':
+                # 用户配置持久化文件：exe 同级已存在则绝不覆盖（升级包
+                # 也不会冲掉用户填写的内容）；缺失时仅首启复制内置空白
+                # 模板，之后由 config_path.ensure_config 接管
+                if not os.path.exists(d):
+                    os.makedirs(os.path.dirname(d), exist_ok=True)
+                    shutil.copy2(s, d)
             else:
                 # 目标不存在，或源比目标新（更新打包资源）
                 if not os.path.exists(d) or os.path.getmtime(s) > os.path.getmtime(d):
