@@ -5,7 +5,7 @@ import time
 import hashlib
 import random
 from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import pickle
 import os
 import asyncio
@@ -25,6 +25,7 @@ class Question:
     API: str = ""
     API_URL: str = ""
     API_MODEL: str = ""
+    images: List[str] = field(default_factory=list)  # 题干/选项图片 data URL
 
 
 @dataclass
@@ -642,7 +643,8 @@ class AutoAnswer:
         start_time = time.time()
         typ_dict = {'0': '单选题', '1': '多选题', '2': '填空题', '3': '判断题', '9': '简答题'}
         title = "【" + typ_dict[question.type] + "】" + question.question + str(question.options)
-        answer = AIAsk(api, title,typ_dict[question.type], api_url=question.API_URL, api_model=question.API_MODEL)
+        answer = AIAsk(api, title, typ_dict[question.type], api_url=question.API_URL,
+                       api_model=question.API_MODEL, images=question.images or None)
         if type(answer) is str:
             try:
                 answer = ast.literal_eval(answer)  # 转换为列表
@@ -717,7 +719,7 @@ class AutoAnswer:
 
 
 # 使用示例
-async def main(typ, question, options, api, api_url='', api_model=''):
+async def main(typ, question, options, api, api_url='', api_model='', images=None):
         """主函数 - 添加详细的来源信息输出"""
         typ_dict = {'单选题': 0, '多选题': 1, '填空题': 2, '判断题': 3, '简答题': 9,'论述题':9, '名词解释':9, '计算题':9}
     # 创建题目实例
@@ -727,7 +729,8 @@ async def main(typ, question, options, api, api_url='', api_model=''):
         options=options,
         API=api,
         API_URL=api_url,
-        API_MODEL=api_model)
+        API_MODEL=api_model,
+        images=images or [])
 
     # 创建自动答题器
         auto_answer = AutoAnswer()

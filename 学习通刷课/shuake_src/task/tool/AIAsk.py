@@ -168,7 +168,7 @@ def get_model(api_model=None, api_url=None, api_key=None):
     return DEFAULT_MODELS[0]
 
 
-def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
+def AIAsk(API_KEY, title, _type, api_url=None, api_model=None, images=None):
     """通用 AI 答题函数（兼容任意 OpenAI 风格接口）
 
     :param API_KEY: API 密钥
@@ -176,6 +176,8 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
     :param _type: 题目类型
     :param api_url: API 地址（留空则使用配置文件 API_URL 或默认接口地址）
     :param api_model: 模型名称（留空则自动从接口获取）
+    :param images: 图片 data URL 列表（题干/选项图片，多模态模型直读；
+                   模型不支持图片时自动降级为纯文本作答）
     """
     if not API_KEY:
         print(color.red('请输入正确的 API Key'), flush=True)
@@ -225,7 +227,22 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
     model = get_model(api_model, api_url, API_KEY)
     ai_proxy = get_ai_proxy()
 
+    # 文本消息 + 多模态消息（图片 data URL 嵌入 content 数组）
     message = {"role": "user", "content": prompt}
+    message_vision = None
+    if images:
+        content = [{"type": "text", "text": prompt}]
+        for u in images:
+            if u:
+                content.append({"type": "image_url", "image_url": {"url": u}})
+        if len(content) > 1:
+            message_vision = {"role": "user", "content": content}
+
+    def _vision_unsupported(err):
+        """模型不支持图片输入时的错误特征（400 + image/vision 关键词）"""
+        msg = str(err)
+        return ('image' in msg.lower() or 'vision' in msg.lower()
+                or 'unsupported' in msg.lower() or 'not support' in msg.lower())
 
     def _curl_ask():
         """终极兜底：用系统 curl 发请求。
@@ -282,15 +299,24 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
                 print(color.green('AI 请求成功（curl 兜底通道，后续将优先走此通道）'), flush=True)
                 break
 
-            def _chat_once():
+            def _chat_once(use_vision=True):
                 client = OpenAI(api_key=API_KEY, base_url=api_url,
                                 timeout=60, max_retries=1)
-                return client.chat.completions.create(
-                    model=model,
-                    messages=[message],
-                    temperature=1.3,
-                    stream=False
-                ).choices[0].message.content
+                msg = message_vision if (use_vision and message_vision) else message
+                try:
+                    return client.chat.completions.create(
+                        model=model,
+                        messages=[msg],
+                        temperature=1.3,
+                        stream=False
+                    ).choices[0].message.content
+                except Exception as e:
+                    if use_vision and message_vision and _vision_unsupported(e):
+                        print(color.yellow('当前模型不支持图片输入，已降级为文本作答'
+                                           '（图片题请改用 gpt-4o / qwen-vl 等多模态模型）'),
+                              flush=True)
+                        return _chat_once(use_vision=False)
+                    raise
 
             if label == 'AI 专用代理':
                 # 临时把 http_proxy/https_proxy 指向 AI 代理，

@@ -17,6 +17,7 @@ from task.tool import color
 import sys
 from task.tool.ai_wen_da import main,AnswerAPI,Question
 from task.tool.AIAsk import AIAsk
+from task.tool.img_capture import extract_images
 from task.tool.send_wx import send_error
 from task.tool.console import ensure_utf8_stdout
 
@@ -79,6 +80,7 @@ class Answer:
         self.only_title_text = []
         self.reword_time = 0
         self.all_optionWebElementList = []
+        self.question_images = {}   # 题号 -> 题干/选项图片 data URL 列表
         self.times = times
         if self.work_choice is not None:
             self.main()
@@ -150,19 +152,31 @@ class Answer:
             self.title_element = self.title_and_option_element.find_element(By.CSS_SELECTOR,
                                                                             '[class="clearfix font-cxsecret fontLabel"]')
             self.title = re.sub(r'\s+', '', self.decodeSecret.decode(self.title_element.text).strip())
+            # 题干图片：采集并转 data URL（多模态 AI 直读），标注并入题干文本
+            _title_mark, _title_imgs = extract_images(self.driver, self.title_element)
             # 题目类型（英文标记归一化为中文，未知题型保持原样走"无法作答"分支）
             self.questionType = self.title[self.title.find("【") + 1: self.title.find("】")]
             self.questionType = QUESTION_TYPE_ALIAS.get(
                 self.questionType.strip().lower(), self.questionType)
             # 题目文本
             self.title_text = self.title[self.title.find("】") + 1:]
+            if _title_mark:
+                self.title_text = self.title_text + ' ' + _title_mark
             self.only_title_text.append(self.title_text)
             self.questionType_list.append(self.questionType)
             if self.questionType in ['单选题', '多选题','判断题']:
                 self.all_optionWebElementList.append(
                     self.title_and_option_element.find_elements(By.TAG_NAME, 'li'))
+                _opt_imgs = []
                 for option in self.title_and_option_element.find_elements(By.TAG_NAME, 'li'):
-                    self.option_text_list.append(re.sub(r'\s+', '', self.decodeSecret.decode(option.text).strip()))
+                    _opt_mark, _opt_urls = extract_images(self.driver, option)
+                    _opt_imgs.extend(_opt_urls)
+                    option_text = re.sub(r'\s+', '',
+                                         self.decodeSecret.decode(option.text).strip())
+                    if _opt_mark:
+                        option_text = option_text + ' ' + _opt_mark
+                    self.option_text_list.append(option_text)
+                self.question_images[i] = _title_imgs + _opt_imgs
             elif self.questionType in ['简答题', '论述题', '填空题','名词解释', '计算题']:
                 self.all_optionWebElementList.append(None)
                 self.option_text_list  =['']
@@ -240,7 +254,8 @@ class Answer:
                 try:
                     self.answer_list = asyncio.run(
                         main(self.questionType_list[i], self.only_title_text[i], self.num_option_dit[i], self.API_KEY,
-                             api_url=self.API_URL, api_model=self.API_MODEL))
+                             api_url=self.API_URL, api_model=self.API_MODEL,
+                             images=self.question_images.get(i, [])))
                 except Exception as e:
                     print(color.red(f'第{i+1}题搜索失败：{e}'), flush=True)
 
@@ -249,7 +264,8 @@ class Answer:
                     try:
                         self.answer_list = asyncio.run(
                             main(self.questionType_list[i], self.only_title_text[i], self.num_option_dit[i], self.API_KEY,
-                                 api_url=self.API_URL, api_model=self.API_MODEL))
+                                 api_url=self.API_URL, api_model=self.API_MODEL,
+                                 images=self.question_images.get(i, [])))
                     except Exception as e:
                         print(color.red(f'第{i+1}题搜索失败：{e}'), flush=True)
                     self.answer_list = self._parse_answer_list(self.answer_list)
@@ -279,10 +295,13 @@ class Answer:
             print(color.red('正在使用AI搜题，请耐心等待...'), flush=True)
             title = ''
             num = 0
-            for no_answer_title in self.no_answer_dit.values():
+            _batch_images = []
+            for no_answer_key, no_answer_title in self.no_answer_dit.items():
                 title += no_answer_title
+                _batch_images += self.question_images.get(no_answer_key, [])
             try:
-                answers = AIAsk(self.API_KEY, title, 'all', api_url=self.API_URL, api_model=self.API_MODEL)
+                answers = AIAsk(self.API_KEY, title, 'all', api_url=self.API_URL,
+                                api_model=self.API_MODEL, images=_batch_images or None)
                 if not answers or answers.strip() in ('[]', ''):
                     # AI 请求失败返回 '[]'：视为无答案，留空跳过，不填脏数据
                     print(color.red('AI 兜底未返回有效答案，无答案的题将留空'), flush=True)
@@ -327,10 +346,26 @@ class Answer:
         option_num=0
         try:
             if self.questionType_list[title_num]=='单选题' or self.questionType_list[title_num]=='判断题':
-                for option in self.num_option_dit[title_num]:
+                _opts = self.num_option_dit[title_num]
+                for option in _opts:
                     if answer[0] in option:
                        break
                     option_num+=1
+                if option_num >= len(_opts):
+                    # 文本匹配失败：AI 可能返回字母（图片选项无文字时）
+                    # 按 A/B/C/D 字母序直接映射选项下标
+                    _letter = re.sub(r'[^A-Ha-h]', '', str(answer[0])).upper()
+                    if _letter:
+                        _idx = ord(_letter[0]) - ord('A')
+                        if 0 <= _idx < len(_opts):
+                            option_num = _idx
+                            print(color.yellow(f'按选项字母 {_letter[0]} 匹配第{option_num+1}项'), flush=True)
+                        else:
+                            print(color.red(f'答案字母 {_letter} 超出选项范围，跳过该题'), flush=True)
+                            return False
+                    else:
+                        print(color.red(f'答案与任何选项都不匹配，跳过该题'), flush=True)
+                        return False
                 if self.all_optionWebElementList[title_num][option_num].get_attribute('aria-checked')== 'true':
                     print(color.red('已回答，无需重复回答'),flush=True)
                 else:
@@ -348,6 +383,19 @@ class Answer:
                         if ans in option:
                            self.answer_num .append(option_num)
                     option_num+=1
+                if not self.answer_num:
+                    # 文本匹配失败：按答案字母（A/B/C/D）直接映射选项下标
+                    for ans in lst:
+                        _letter = re.sub(r'[^A-Ha-h]', '', str(ans)).upper()
+                        if _letter:
+                            _idx = ord(_letter[0]) - ord('A')
+                            if 0 <= _idx < len(self.num_option_dit[title_num]):
+                                self.answer_num.append(_idx)
+                    if self.answer_num:
+                        print(color.yellow(f'多选题按字母映射选项：{sorted(set(self.answer_num))}'), flush=True)
+                    else:
+                        print(color.red(f'多选题答案与任何选项都不匹配，跳过该题'), flush=True)
+                        return False
                 self.answer_num=list(set(self.answer_num))
                 # 点击正确答案
                 for ans in self.answer_num:
