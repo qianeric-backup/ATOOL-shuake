@@ -1,4 +1,5 @@
 import time
+import re
 from selenium.webdriver.common.by import By
 from task.tool import color
 from task.quiz_ai import Answer
@@ -14,14 +15,19 @@ def turn_page(driver,page_name):
             break
 
 class do_work(Answer):
+    MAX_REDO = 2   # 「自动提交并重做」最大重做轮次，防止死循环
+
     def __init__(self,driver,course_name,homework,API_KEY,after_finish_question='仅自动保存',
-                 api_url='',api_model=''):
+                 api_url='',api_model='',redo_answers=None):
         Answer.__init__(self,driver,test_frame=None,course_name=course_name,api=API_KEY,work_choice=None,after_finish_question=after_finish_question,
                     api_url=api_url, api_model=api_model)
 
         self.homework = homework
         self.driver = driver
         self.course_name = course_name
+        self.current_homework_name = None      # 自动模式下当前处理的作业名（重做用）
+        self.redo_answers = redo_answers or {} # 错题修正答案 {题目索引i: [答案]}
+        self.redo_round = 0                    # 已重做轮次
         if self.homework == '自动选择':
             if not self.auto_choice_homework_question():
                 # 实测（2026-09）：「作业」nav 在部分学校加载的是 mobilelearn
@@ -139,6 +145,7 @@ class do_work(Answer):
             # 获取作业名称
             homework_name = homework.get_attribute('aria-label')
             print(color.green(f'开始处理第{i + 1}个作业：{homework_name}'), flush=True)
+            self.current_homework_name = homework_name   # 供「自动提交并重做」重开同名作业
             # 点击作业
             homework.click()
             time.sleep(1)
@@ -201,6 +208,20 @@ class do_work(Answer):
                 self.option_text_list.append((option_element.get_attribute('aria-label') or '')[:-2])
             self.all_title_dit[i] = self.title_and_option_text
             self.num_option_dit[i] = self.option_text_list
+        # 「自动提交并重做」重做轮次：错题直接使用修正答案（跳过搜题）；
+        # 详情页未提取到答案的题留空，由 use_ai_fallback 重新搜题兜底
+        if self.redo_answers:
+            filled = 0
+            for i, ans in self.redo_answers.items():
+                if (i < len(self.only_title_text) and ans
+                        and self.questionType_list[i] in
+                        ('单选题', '多选题', '判断题', '简答题', '论述题',
+                         '名词解释', '计算题', '填空题')):
+                    self.num_answer_dit[i] = ans
+                    filled += 1
+                    print(color.green(f'重做修正：第{i+1}题使用已知答案 {ans}'), flush=True)
+            if filled:
+                print(color.green(f'重做轮次：{filled} 道错题已预填修正答案'), flush=True)
         print(color.red('正在搜索中，请耐心等待...'))
         self.use_ai_wen_da()
         self.use_ai_fallback()
@@ -215,35 +236,209 @@ class do_work(Answer):
             print(color.red('保存失败，请手动保存，15秒后继续'), flush=True)
             time.sleep(15)
             return
-        if self.after_finish_question == '强制自动提交':
-            # 高级设置「答完题后」配置为直接提交：点提交 + 确认弹窗
-            print(color.red('已配置为直接提交，3秒后提交，AI 答题不一定完全正确'), flush=True)
+        if self.after_finish_question == '强制自动提交' or self.after_finish_question == '自动提交并重做':
+            # 高级设置「答完题后」配置为提交：点提交 + 确认弹窗
+            print(color.red(f'已配置为{self.after_finish_question}，3秒后提交，AI 答题不一定完全正确'), flush=True)
             time.sleep(3)
-            try:
-                self.driver.find_element(By.CSS_SELECTOR, '[class="btnSubmit workBtnIndex"]').click()
-                time.sleep(1)
-            except Exception:
+            submitted = self._submit_work()
+            if not submitted:
                 print(color.red('当前页面无提交按钮，回退为仅暂时保存'), flush=True)
                 self._save_only()
                 return
-            try:
-                self.driver.switch_to.default_content()
-                self.driver.find_element(By.XPATH, '//*[@id="popok"]').click()
-                time.sleep(2)
-                message = self.driver.find_element(By.ID, 'popcontent').text
-                if message:
-                    print(color.red(f'提交失败，原因：{message}'), flush=True)
-                    self.driver.find_element(By.ID, 'popok').click()
-                else:
-                    print(color.green('作业已直接提交'), flush=True)
-            except Exception:
-                print(color.red('提交确认弹窗处理异常，请人工确认提交状态'), flush=True)
+            if self.after_finish_question == '自动提交并重做':
+                # 提交成功后拉取详情页错题，需要重做时进入重做流程
+                self._handle_redo_after_submit()
             return
         if self.after_finish_question != '仅自动保存':
             # 「搜到XX%自动提交」等选项在作业链路不生效（无答题率统计），回退保存
             print(color.yellow(f'作业链路不支持「{self.after_finish_question}」，按仅保存处理'), flush=True)
         print(color.red('暂时保存，AI答题不一定完全正确，请自行确认后再提交'), flush=True)
         self._save_only()
+
+    def _submit_work(self):
+        """提交作业 + 确认弹窗。返回 True=已提交。"""
+        try:
+            self.driver.find_element(By.CSS_SELECTOR, '[class="btnSubmit workBtnIndex"]').click()
+            time.sleep(1)
+        except Exception:
+            return False
+        try:
+            self.driver.switch_to.default_content()
+            self.driver.find_element(By.XPATH, '//*[@id="popok"]').click()
+            time.sleep(2)
+            message = self.driver.find_element(By.ID, 'popcontent').text
+            if message:
+                print(color.red(f'提交失败，原因：{message}'), flush=True)
+                try:
+                    self.driver.find_element(By.ID, 'popok').click()
+                except Exception:
+                    pass
+                return False
+            print(color.green('作业已提交'), flush=True)
+            return True
+        except Exception:
+            print(color.red('提交确认弹窗处理异常，请人工确认提交状态'), flush=True)
+            return True
+
+    # ---- 「自动提交并重做」：详情页错题拉取 ----
+    _WRONG_VIEW_BTNS = ('查看成绩', '查看详情', '查看解析', '成绩详情', '查看')
+    # 错题标记候选（不同版本学习通 DOM 差异大，宽松匹配）
+    _WRONG_MARKERS = ('[class*="wrong"]', '[class*="cuo"]', '.cuo',
+                      '[class*="error"]', '[class*="fault"]',
+                      '[class*="incorrect"]')
+    _ANSWER_PATTERNS = (r'正确答案[:：]\s*(.+)', r'正确答案[为是]\s*(.+)',
+                        r'答案[:：]\s*(.+)')
+
+    def _open_result_page(self):
+        """提交后找「查看成绩/详情」入口并进入。返回 True=已进入详情页。"""
+        candidates = []
+        try:
+            candidates = self.driver.find_elements(By.TAG_NAME, 'a') + \
+                         self.driver.find_elements(By.TAG_NAME, 'button')
+        except Exception:
+            pass
+        for el in candidates:
+            try:
+                txt = (el.text or '').strip()
+            except Exception:
+                txt = ''
+            if txt and any(k in txt for k in self._WRONG_VIEW_BTNS):
+                try:
+                    self.driver.execute_script(
+                        "arguments[0].scrollIntoView({block:'center'});", el)
+                    el.click()
+                    time.sleep(2)
+                    return True
+                except Exception:
+                    continue
+        return False
+
+    def _fetch_wrong_questions(self):
+        """进入详情页后解析错题。
+
+        返回 {题目原始索引 i: [正确答案]}；答案文本提取不到时值为 []
+        （重做时该题将重新搜题作答，不丢题）。
+        """
+        wrong = {}
+        markers = []
+        for css in self._WRONG_MARKERS:
+            try:
+                markers = self.driver.find_elements(By.CSS_SELECTOR, css)
+                if markers:
+                    break
+            except Exception:
+                continue
+        if not markers:
+            print(color.yellow('详情页未识别到错题标记（页面结构可能不同），'
+                               '重做时将重新搜题作答'), flush=True)
+            return wrong
+        for m in markers:
+            try:
+                container = m.find_element(By.XPATH, './ancestor::*[contains(@class,"singleQuesId") '
+                                                    'or contains(@class,"questionLi") '
+                                                    'or contains(@class,"padBom50")]')
+            except Exception:
+                container = m.find_element(By.XPATH, './ancestor::li') if False else m
+            try:
+                text = container.text if container is not m else \
+                    m.find_element(By.XPATH, '../..').text
+            except Exception:
+                text = m.text
+            # 提取题目序号（第N题 / N.）与答案
+            answer = []
+            for pat in self._ANSWER_PATTERNS:
+                mm = re.search(pat, text)
+                if mm:
+                    answer = [mm.group(1).strip()]
+                    break
+            # 题目文本与首轮 only_title_text 匹配定位索引
+            idx = self._match_question_index(text)
+            if idx is not None:
+                wrong[idx] = answer
+                print(color.red(f'检测到第{idx+1}题答错'
+                                f'{f"，修正答案：{answer}" if answer else "，重做时将重新搜题"}'),
+                      flush=True)
+        return wrong
+
+    def _match_question_index(self, text):
+        """按题目文本模糊匹配首轮解析出的题目索引。"""
+        for i, t in enumerate(self.only_title_text):
+            if t and (t in text or text in t):
+                return i
+        # 失败时尝试「第N题」序号
+        mm = re.search(r'第\s*(\d+)\s*题', text)
+        if mm:
+            idx = int(mm.group(1)) - 1
+            if 0 <= idx < len(self.only_title_text):
+                return idx
+        return None
+
+    def _handle_redo_after_submit(self):
+        """提交后：拉详情页错题 → 有错题且未到轮次上限则重做修正。"""
+        print(color.yellow('正在拉取提交详情，识别错误题目...'), flush=True)
+        if not self._open_result_page():
+            print(color.yellow('未找到成绩/详情入口，跳过重做'), flush=True)
+            return
+        wrong = self._fetch_wrong_questions()
+        if not wrong:
+            print(color.green('本次作业全部答对，无需重做'), flush=True)
+            return
+        if self.redo_round >= self.MAX_REDO:
+            print(color.red(f'已达最大重做轮次（{self.MAX_REDO}），请人工检查详情页错题'), flush=True)
+            return
+        self.redo_round += 1
+        print(color.red(f'第 {self.redo_round} 次重做：{len(wrong)} 道错题待修正'), flush=True)
+        self._redo(wrong)
+
+    def _redo(self, wrong_answers):
+        """关闭作业窗口 → 回课程页重新打开同一作业 → 带修正答案重做。"""
+        try:
+            self.driver.close()
+        except Exception:
+            pass
+        time.sleep(2)
+        turn_page(self.driver, self.course_name)
+        try:
+            self.driver.switch_to.frame(self.driver.find_element(By.TAG_NAME, 'iframe'))
+        except Exception:
+            pass
+        if self.homework == '自动选择' and self.current_homework_name:
+            self._reopen_homework(self.current_homework_name, wrong_answers)
+        else:
+            # 手动模式：等待用户重新点开作业
+            print(color.green('请重新点开该作业（将修正错题后再次提交）'), flush=True)
+            self.wait_manual_open()
+
+    def _reopen_homework(self, name, wrong_answers):
+        """自动模式下按作业名重新点开作业并带修正答案重做。"""
+        element = None
+        for _ in range(10):
+            try:
+                element = self.driver.find_element(By.CLASS_NAME, 'bottomList')
+                break
+            except Exception:
+                time.sleep(1)
+        if element is None:
+            print(color.red('重做：未找到作业列表，请手动点开作业'), flush=True)
+            self.wait_manual_open()
+            return
+        for li in element.find_elements(By.TAG_NAME, 'li'):
+            try:
+                label = (li.get_attribute('aria-label') or '').strip()
+            except Exception:
+                label = ''
+            if label == name:
+                try:
+                    li.click()
+                    time.sleep(1)
+                except Exception:
+                    self.driver.execute_script("arguments[0].click();", li)
+                    time.sleep(1)
+                print(color.green(f'重做：已重新打开作业《{name}》'), flush=True)
+                self.get_answer_list()
+                return
+        print(color.red('重做：未在列表中找到同名作业，请手动点开'), flush=True)
+        self.wait_manual_open()
 
     def _save_only(self):
         for save_element in self.save_elements:

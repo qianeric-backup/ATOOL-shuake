@@ -247,6 +247,9 @@ class Answer:
 
     def use_ai_wen_da(self):
         for i in self.all_title_dit.keys():
+            if i in self.num_answer_dit:
+                # 「自动提交并重做」重做轮次：该题已由修正答案填充，跳过搜题
+                continue
             if self.times==0 and self.work_choice!='随机答题':
                 print(color.green('\n<===================  分隔线  ===================>\n'), flush=True)
                 # 先置空：搜索抛异常时不能沿用上一题的答案（会错答本题）
