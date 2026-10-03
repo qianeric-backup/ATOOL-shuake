@@ -73,6 +73,48 @@ def get_api_url(api_url=None):
     return strip_endpoint(url) or DEFAULT_API_URL
 
 
+def get_ai_proxy(proxy=None):
+    """AI 专用代理地址（account_info.json 的 AI_PROXY 字段）。
+
+    场景：客户 AI 模型接口在国外（OpenAI 等），学习通/国内题库必须直连。
+    工具按目标分流：AI 调用显式走此代理（clash 国外节点端口，如
+    http://127.0.0.1:7892），学习通页面与国内搜题 API 不走它。
+    留空则沿用进程环境变量/系统代理（不强制分流）。
+    """
+    if proxy:
+        return proxy.strip()
+    config = _load_config()
+    return str(config.get('AI_PROXY', '') or '').strip()
+
+
+# OpenAI SDK/httpx 默认 trust_env=True，会读 http_proxy/https_proxy 环境
+# 变量走代理；用「临时设置环境变量」实现 AI 专用代理分流，比注入
+# http_client 兼容任意 openai 版本（1.x/2.x/3.x，不依赖 httpx2 内部 API）。
+_AI_PROXY_KEYS = ('http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY')
+
+
+def _with_ai_proxy_env(proxy, fn):
+    """临时把 http_proxy/https_proxy 指向 AI 专用代理并执行 fn。
+
+    执行期间仅本线程可见的环境变量视图（os.environ 进程级，串行
+    调用场景安全）；结束后恢复原值。
+    """
+    saved = {}
+    for k in _AI_PROXY_KEYS:
+        saved[k] = os.environ.get(k)
+    try:
+        if proxy:
+            os.environ['http_proxy'] = proxy
+            os.environ['https_proxy'] = proxy
+        return fn()
+    finally:
+        for k, v in saved.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 def get_model_list(api_url=None, api_key=None):
     """从 API 接口自动获取模型列表
 
@@ -85,7 +127,8 @@ def get_model_list(api_url=None, api_key=None):
     if not api_key:
         return []
     try:
-        client = OpenAI(api_key=api_key, base_url=api_url)
+        client = _with_ai_proxy_env(get_ai_proxy(),
+                                    lambda: OpenAI(api_key=api_key, base_url=api_url))
         models = client.models.list()
         model_ids = [m.id for m in models.data]
         if model_ids:
@@ -180,13 +223,15 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
 
     api_url = get_api_url(api_url)
     model = get_model(api_model, api_url, API_KEY)
+    ai_proxy = get_ai_proxy()
 
     message = {"role": "user", "content": prompt}
 
     def _curl_ask():
         """终极兜底：用系统 curl 发请求。
         当 Clash/TUN 等按进程名分流（python 走故障节点、curl 直连）、
-        或 httpx/OpenAI SDK 自身网络栈异常时，curl 通常仍可直达"""
+        或 httpx/OpenAI SDK 自身网络栈异常时，curl 通常仍可直达。
+        配置了 AI_PROXY 时 curl 显式走该代理（-x），保证国外 AI 可达。"""
         import subprocess
         payload = json.dumps({"model": model, "messages": [message],
                               "temperature": 1.3, "stream": False})
@@ -195,6 +240,8 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
                '-H', f'Authorization: Bearer {API_KEY}',
                '-H', 'Content-Type: application/json',
                '-d', payload]
+        if ai_proxy:
+            cmd[2:2] = ['-x', ai_proxy]   # 显式走 AI 专用代理
         proc = subprocess.run(cmd, capture_output=True, timeout=100)
         out = proc.stdout.decode('utf-8', errors='replace')
         data = json.loads(out)
@@ -204,7 +251,7 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
             raise RuntimeError(f"curl 收到错误应答: {str(data)[:120]}")
         return data['choices'][0]['message']['content']
 
-    # 请求策略：默认环境 → 重试 → 清代理环境变量直连 → 系统 curl。
+    # 请求策略：AI 专用代理 → 默认环境 → 重试 → 清代理直连 → 系统 curl。
     # 覆盖：网络抖动、残留代理变量、Clash TUN 按进程分流、SDK 栈异常。
     # 通道偏好记忆：curl 成功过一次后，同进程内后续请求直接优先走
     # curl（TUN 分流是持续性的，没必要每题都先烧一遍失败通道）
@@ -212,9 +259,14 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
                    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY',
                    'no_proxy', 'NO_PROXY')
     attempts = ('默认环境', '重试', '清代理直连', 'curl 兜底')
+    if ai_proxy:
+        # 有显式 AI 代理时：它最懂目标网络（国外 AI 节点），放第一位，
+        # 且提示用户代理分流生效
+        attempts = ('AI 专用代理', '默认环境', '重试', '清代理直连', 'curl 兜底')
+        print(color.yellow(f'AI 请求将走专用代理 {ai_proxy}（学习通/题库仍直连）'), flush=True)
     global _preferred_channel
     if _preferred_channel == 'curl':
-        attempts = ('curl 兜底', '默认环境', '重试', '清代理直连')
+        attempts = ('curl 兜底',) + tuple(a for a in attempts if a != 'curl 兜底')
     answer = None
     last_err = None
     for idx, label in enumerate(attempts):
@@ -229,14 +281,23 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None):
                 _preferred_channel = 'curl'
                 print(color.green('AI 请求成功（curl 兜底通道，后续将优先走此通道）'), flush=True)
                 break
-            client = OpenAI(api_key=API_KEY, base_url=api_url, timeout=60, max_retries=1)
-            response = client.chat.completions.create(
-                model=model,
-                messages=[message],
-                temperature=1.3,
-                stream=False
-            )
-            answer = response.choices[0].message.content
+
+            def _chat_once():
+                client = OpenAI(api_key=API_KEY, base_url=api_url,
+                                timeout=60, max_retries=1)
+                return client.chat.completions.create(
+                    model=model,
+                    messages=[message],
+                    temperature=1.3,
+                    stream=False
+                ).choices[0].message.content
+
+            if label == 'AI 专用代理':
+                # 临时把 http_proxy/https_proxy 指向 AI 代理，
+                # httpx/OpenAI SDK 自动走该代理访问国外 AI 接口
+                answer = _with_ai_proxy_env(ai_proxy, _chat_once)
+            else:
+                answer = _chat_once()
             break
         except Exception as e:
             last_err = e

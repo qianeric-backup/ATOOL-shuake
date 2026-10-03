@@ -776,6 +776,15 @@ class StartWindow(QMainWindow):
         gl.addWidget(self.API_MODEL_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
         gl.addWidget(self._input_widget(self.API_MODEL_entry), self._detail_row_next - 1, 1,
                      Qt.AlignmentFlag.AlignLeft)
+
+        # AI 专用代理（双 clash 分流）：AI 请求固定走国外节点，
+        # 学习通/国内题库不受影响。留空 = 沿用系统环境/进程分流。
+        self.AI_PROXY_label = QLabel('AI 代理:')
+        self.AI_PROXY_entry = QLineEdit()
+        self.AI_PROXY_entry.setPlaceholderText('http://127.0.0.1:7892 （国外 AI 节点；留空=自动）')
+        gl.addWidget(self.AI_PROXY_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
+        gl.addWidget(self._input_widget(self.AI_PROXY_entry), self._detail_row_next - 1, 1,
+                     Qt.AlignmentFlag.AlignLeft)
         self.refresh_models_button = QPushButton('🔄 刷新模型')
         self.refresh_models_button.setFixedWidth(90)
         self.refresh_models_button.clicked.connect(self.fetch_models)
@@ -1243,9 +1252,13 @@ class StartWindow(QMainWindow):
                    'messages': [{'role': 'user', 'content': '你好，请只回复:OK'}],
                    'max_tokens': 5, 'stream': False}
         t0 = _time.time()
+        proxies = {}
+        ai_proxy = self.AI_PROXY_entry.text().strip()
+        if ai_proxy:
+            proxies = {'http': ai_proxy, 'https': ai_proxy}
         try:
             resp = requests.post(base + '/chat/completions', json=payload,
-                                 headers=headers, timeout=20)
+                                 headers=headers, timeout=20, proxies=proxies)
             latency = int((_time.time() - t0) * 1000)
             if resp.status_code == 200:
                 try:
@@ -1874,6 +1887,7 @@ class StartWindow(QMainWindow):
             for w in (self.API_label, self.API_entry, self.show_api_button,
                       self.API_URL_label, self.API_URL_entry,
                       self.API_MODEL_label, self.API_MODEL_entry,
+                      self.AI_PROXY_label, self.AI_PROXY_entry,
                       self.refresh_models_button, self.test_api_button,
                       self.api_status_label):
                 w.setVisible(use_ai)
@@ -1998,6 +2012,7 @@ class StartWindow(QMainWindow):
         data['API'] = self.API_entry.text()
         data['API_URL'] = self.API_URL_entry.currentText().strip()
         data['API_MODEL'] = self.API_MODEL_entry.currentText().strip()
+        data['AI_PROXY'] = self.AI_PROXY_entry.text().strip()
         data['speed'] = self.speed_entry.currentText()
         data['homework'] = self.homework_entry.currentText()
         data['task_type'] = ('章节' if self._current_mode == 1
@@ -2236,6 +2251,7 @@ class StartWindow(QMainWindow):
         self.API_entry.setText(data.get('API', ''))
         self.API_URL_entry.setEditText(data.get('API_URL', ''))
         self.API_MODEL_entry.setCurrentText(data.get('API_MODEL', ''))
+        self.AI_PROXY_entry.setText(data.get('AI_PROXY', ''))
         try:
             if data.get('font_type'):
                 self.font_entry.setCurrentText(data['font_type'])

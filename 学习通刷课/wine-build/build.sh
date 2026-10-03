@@ -34,6 +34,7 @@ cat > src/task/tool/account_info.json <<'EOF'
   "API": "",
   "API_URL": "",
   "API_MODEL": "",
+  "AI_PROXY": "",
   "speed": "1",
   "homework": "手动选择",
   "task_type": "章节",

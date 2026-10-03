@@ -1,0 +1,33 @@
+# ============================================================
+# 双 clash 进程之二：国外 AI 实例（OpenAI 等海外模型接口）
+# 端口: 7892（混合端口 HTTP+SOCKS5）
+# 本实例所有流量走国外节点。学习通刷课工具里把
+# 「AI 代理」填成 http://127.0.0.1:7892 即可让 AI 请求
+# 固定走这里，而学习通/题库仍直连（不受本实例影响）。
+#
+# 使用前请把下面的 AI-NODE 替换成你自己的节点/订阅：
+#   方式 A（单节点）：修改 proxies 里的 server/port/cipher/password
+#   方式 B（订阅）：把 proxies 整段删掉，换成 proxies-providers
+# ============================================================
+mixed-port: 7892
+allow-lan: true
+mode: rule
+log-level: info
+
+proxies:
+  - name: "AI-NODE"
+    type: ss
+    server: YOUR_SERVER_IP_OR_DOMAIN
+    port: 443
+    cipher: aes-256-gcm
+    password: YOUR_PASSWORD
+
+proxy-groups:
+  - name: "AI-PROXY"
+    type: select
+    proxies:
+      - "AI-NODE"
+      - "DIRECT"
+
+rules:
+  - MATCH,AI-PROXY
