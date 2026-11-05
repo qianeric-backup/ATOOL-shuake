@@ -167,6 +167,51 @@ def get_model(api_model=None, api_url=None, api_key=None):
     return DEFAULT_MODELS[0]
 
 
+# ---------------------------------------------------------------- 识图（多模态）
+# 单次请求最多附带几张题目图片（再多容易 400 / 超时 / 超 token）
+MAX_VISION_IMAGES = 8
+# 单张 data URL 的字符上限（约 2.2MB 二进制；超过接口普遍拒绝）
+MAX_VISION_IMAGE_CHARS = 3_000_000
+
+VISION_HINT = ('\n\n【识图说明】本题的题干和/或选项以图片形式给出，图片已随本条消息附带。'
+               '请直接读图：识别图片中的文字、公式、图表、代码或图形，'
+               '再结合文字题干作答；选项图片按 A/B/C/D 顺序对应。')
+
+
+def _prepare_images(images):
+    """过滤/裁剪待发送的图片列表。
+
+    - 只接受 data:image/* 与 http(s) 直链；
+    - 单张超限（接口会 400）直接丢弃并提示；
+    - 最多 MAX_VISION_IMAGES 张，顺序保持（A/B/C/D 选项图顺序有意义）。
+    """
+    if not images:
+        return []
+    out = []
+    dropped = 0
+    for item in images:
+        if not isinstance(item, str):
+            continue
+        url = item.strip()
+        if not url:
+            continue
+        if not (url.startswith('data:image/') or url.startswith('http://')
+                or url.startswith('https://')):
+            continue
+        if len(url) > MAX_VISION_IMAGE_CHARS:
+            dropped += 1
+            continue
+        if url in out:
+            continue
+        out.append(url)
+        if len(out) >= MAX_VISION_IMAGES:
+            break
+    if dropped:
+        print(color.yellow(f'有 {dropped} 张图片体积超过接口上限（{MAX_VISION_IMAGE_CHARS} 字符），'
+                           f'已跳过'), flush=True)
+    return out
+
+
 def AIAsk(API_KEY, title, _type, api_url=None, api_model=None, images=None):
     """通用 AI 答题函数（兼容任意 OpenAI 风格接口）
 
@@ -222,6 +267,12 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None, images=None):
                                                     \n'''
     prompt += title
 
+    def _build_vision_message(urls):
+        content = [{"type": "text", "text": prompt + VISION_HINT}]
+        for url in urls:
+            content.append({"type": "image_url", "image_url": {"url": url}})
+        return {"role": "user", "content": content}
+
     api_url = get_api_url(api_url)
     model = get_model(api_model, api_url, API_KEY)
     ai_proxy = get_ai_proxy()
@@ -229,13 +280,12 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None, images=None):
     # 文本消息 + 多模态消息（图片 data URL 嵌入 content 数组）
     message = {"role": "user", "content": prompt}
     message_vision = None
-    if images:
-        content = [{"type": "text", "text": prompt}]
-        for u in images:
-            if u:
-                content.append({"type": "image_url", "image_url": {"url": u}})
-        if len(content) > 1:
-            message_vision = {"role": "user", "content": content}
+    image_list = _prepare_images(images)
+    if image_list:
+        # 明确告诉模型"这里有图、以图为准"，纯文本模型收到后也能按提示作答
+        message_vision = _build_vision_message(image_list)
+        print(color.green(f'[识图] 本次请求附带 {len(image_list)} 张题目图片（模型：{model}）'),
+              flush=True)
 
     def _vision_unsupported(err):
         """模型不支持图片输入时的错误特征（400 + image/vision 关键词）"""
@@ -249,7 +299,8 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None, images=None):
         或 httpx/OpenAI SDK 自身网络栈异常时，curl 通常仍可直达。
         配置了 AI_PROXY 时 curl 显式走该代理（-x），保证国外 AI 可达。"""
         import subprocess
-        payload = json.dumps({"model": model, "messages": [message],
+        # 有图时必须发多模态消息体，否则 curl 通道会把图片丢掉、退化成纯文本作答
+        payload = json.dumps({"model": model, "messages": [message_vision or message],
                               "temperature": 1.3, "stream": False})
         cmd = ['curl', '-sS', '--max-time', '90', '-X', 'POST',
                f'{api_url}/chat/completions',
@@ -298,10 +349,16 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None, images=None):
                 print(color.green('AI 请求成功（curl 兜底通道，后续将优先走此通道）'), flush=True)
                 break
 
-            def _chat_once(use_vision=True):
+            def _chat_once(use_vision=True, images_override=None):
                 client = OpenAI(api_key=API_KEY, base_url=api_url,
                                 timeout=60, max_retries=1)
-                msg = message_vision if (use_vision and message_vision) else message
+                if use_vision and message_vision:
+                    if images_override is not None:
+                        msg = _build_vision_message(images_override)
+                    else:
+                        msg = message_vision
+                else:
+                    msg = message
                 try:
                     return client.chat.completions.create(
                         model=model,
@@ -311,8 +368,21 @@ def AIAsk(API_KEY, title, _type, api_url=None, api_model=None, images=None):
                     ).choices[0].message.content
                 except Exception as e:
                     if use_vision and message_vision and _vision_unsupported(e):
+                        # 第一级降级：混合了 URL 直链时先去掉 URL 只发 base64
+                        # （URL 抓不到是服务端 fetch 失败，与模型能力无关）
+                        data_only = [u for u in image_list if u.startswith('data:')]
+                        has_url = [u for u in image_list
+                                   if u.startswith('http')]
+                        if has_url and data_only and images_override is None:
+                            print(color.yellow('图片直链抓取失败，改用内嵌 base64 图片重试'),
+                                  flush=True)
+                            return _chat_once(use_vision=True, images_override=data_only)
+                        if has_url and not data_only and images_override is None:
+                            print(color.yellow('图片直链无法被模型服务端抓取，降级为文本作答'),
+                                  flush=True)
+                            return _chat_once(use_vision=False)
                         print(color.yellow('当前模型不支持图片输入，已降级为文本作答'
-                                           '（图片题请改用 gpt-4o / qwen-vl 等多模态模型）'),
+                                           '（图片题请改用 deepseek 视觉版 / gpt-4o / qwen-vl 等多模态模型）'),
                               flush=True)
                         return _chat_once(use_vision=False)
                     raise

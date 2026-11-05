@@ -32,6 +32,9 @@ DEFAULT_CONFIG = {
     "API_URL": "",
     "API_MODEL": "",
     "AI_PROXY": "",
+    "image_qa": 1,      # 识图答题：自动采集题干/选项图片交多模态模型（默认开）
+    "image_max": 8,     # 单题最多附带几张图片
+    "image_ocr": 0,     # 本地 OCR 增强（需 tesseract，默认关，开了每题会慢几秒）
     "speed": "1",
     "homework": "手动选择",
     "task_type": "章节",

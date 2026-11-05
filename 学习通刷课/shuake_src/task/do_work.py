@@ -3,6 +3,7 @@ import re
 from selenium.webdriver.common.by import By
 from task.tool import color
 from task.quiz_ai import Answer
+from task.tool.img_capture import extract_images, dedupe_images
 
 
 def turn_page(driver,page_name):
@@ -164,6 +165,7 @@ class do_work(Answer):
         self.optionWebElementList = []
         self.questionType_list = []
         self.only_title_text = []
+        self.question_images = {}      # 题号 -> 题干/选项图片 data URL 列表
         self.answer_num = []
         # 切换到作业窗口
         turn_page(self.driver, '作业作答')
@@ -190,6 +192,16 @@ class do_work(Answer):
             self.title = self.questionList0[i].find_element(By.CSS_SELECTOR, '[class="mark_name colorDeep fontLabel workTextWrap"]').text
             self.title_text=self.title [self.title.find(")") + 1:]
             # self.title_text=self.title [self.title.find("】") + 1:]
+            # 识图：作业题干/选项图片直接转 data URL 交给多模态模型。
+            # 以整题容器为范围采集（题干图 + 选项图一次性拿到），
+            # title_text 里补 [图片] 标记，图片题才不会因为"无文字"被判空题跳过
+            _title_mark, _title_imgs = extract_images(
+                self.driver, self.questionList0[i], lazy=True)
+            if _title_mark:
+                if not self.title_text.strip():
+                    self.title_text = '（本题题干为图片，请以附图内容为准）'
+                self.title_text = self.title_text + ' ' + _title_mark
+            self.question_images[i] = dedupe_images(_title_imgs)
             self.only_title_text.append(self.title_text)
             self.questionType_list.append(self.questionType)
 

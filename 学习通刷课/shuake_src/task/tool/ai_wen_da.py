@@ -567,6 +567,13 @@ class AutoAnswer:
             answer=answer,
             duration=duration
         )]
+    @staticmethod
+    def _text_only(text):
+        """剥离 `[图片]`/`[图片内容:...]`/图片题占位，返回真正可检索的文字。"""
+        t = re.sub(r'\[图片[^\]]*\]', '', text or '')
+        t = re.sub(r'（(?:本题)?题干为图片[^）]*）', '', t)
+        return re.sub(r'\s+', '', t)
+
     async def auto_answer_question(self, question: Question) -> Dict[str, Any]:
         """自动回答单个题目"""
         global status
@@ -579,7 +586,17 @@ class AutoAnswer:
 
         # 2. 如果缓存没有，从API获取
         if not cache_result.answer :
-            if question.API:
+            # 纯图片题：题干文字被剥掉后几乎为空，题库的文本检索必然乱配到
+            # 相似题上（返回一个"看起来有答案"的错误结果），这里直接走多模态 AI
+            _q_text = self._text_only(question.question)
+            _o_text = ''.join(self._text_only(o) for o in (question.options or []))
+            # 题干与选项都几乎没有文字、却带着图片 —— 纯图片题
+            image_only = (bool(question.images) and len(_q_text) < 10
+                          and len(_o_text) < 20)
+            if question.API and image_only:
+                print('🖼️ 纯图片题，跳过题库直连多模态 AI 识图作答', flush=True)
+                api_results = self.use_ai_fallback(question, question.API)
+            elif question.API:
                 print("🌐 开始从网络API获取答案...",flush=True)
                 time.sleep(1)
                 api_results = await self.api.get_answers_free(question)
@@ -630,41 +647,59 @@ class AutoAnswer:
 
 # 使用示例
 async def main(typ, question, options, api, api_url='', api_model='', images=None):
-        """主函数 - 添加详细的来源信息输出"""
-        typ_dict = {'单选题': 0, '多选题': 1, '填空题': 2, '判断题': 3, '简答题': 9,'论述题':9, '名词解释':9, '计算题':9}
+    """主函数 - 创建题目实例并走缓存/题库/AI 全链路，返回答案列表。"""
+    typ_dict = {'单选题': 0, '多选题': 1, '填空题': 2, '判断题': 3, '简答题': 9,
+                '论述题': 9, '名词解释': 9, '计算题': 9}
+
+    # 图片题：题库/文本匹配只看文字，`[图片]` 这类占位会被当成题干内容导致
+    # 匹配失败，这里在"确实抓到了图片数据"时把占位剥掉（图片本身仍通过
+    # question.images 走多模态通道送达 AI）
+    clean_question = question
+    # 选项以字符串传入时（个别调用方直接给 str）不能 list(str) 拆成单字
+    clean_options = ([options] if isinstance(options, str)
+                     else list(options or []))
+    if images:
+        _mark_re = r'\s*\[图片[^\]]*\]'
+        clean_question = re.sub(r'（本题题干为图片[^）]*）', '', question or '')
+        clean_question = re.sub(_mark_re, '', clean_question).strip()
+        clean_options = [re.sub(_mark_re, '', str(o or '')).strip()
+                         for o in clean_options]
+        if not clean_question:
+            clean_question = '（题干为图片）'
+
     # 创建题目实例
-        question_obj = Question(
+    question_obj = Question(
         type=str(typ_dict[typ]),  # 题目类型
-        question=question,
-        options=options,
+        question=clean_question,
+        options=clean_options,
         API=api,
         API_URL=api_url,
         API_MODEL=api_model,
         images=images or [])
 
     # 创建自动答题器
-        auto_answer = AutoAnswer()
+    auto_answer = AutoAnswer()
 
     # 自动答题
-        result = await auto_answer.auto_answer_question(question_obj)
+    result = await auto_answer.auto_answer_question(question_obj)
 
-        if result['haveAnswer']:
-            answer_source = result.get('form')
-            if answer_source:
-                # 根据题目类型显示具体答案
-                answer_type = result.get('answerType')
-                if answer_type == 'choice' and 'matchedIndices' in result:
-                    indices = result['matchedIndices']
-                    selected_options = [question_obj.options[i] for i in indices]
-                    # print(f"   选项: {selected_options}",flush=True)
-                    return selected_options
-                elif answer_type == 'judgment':
-                    # print(f"   判断: {[result.get('answer')]}",flush=True)
-                    return [result.get('answer')]
-                elif answer_type == 'text':
-                    # print(f"   文本答案: {answer_source.answer}",flush=True)
-                    return answer_source.answer
-            return result['form'].answer if result.get('form') else []
-        else:
-            print("未找到答案",flush=True)
-            return []
+    if result['haveAnswer']:
+        answer_source = result.get('form')
+        if answer_source:
+            # 根据题目类型显示具体答案
+            answer_type = result.get('answerType')
+            if answer_type == 'choice' and 'matchedIndices' in result:
+                indices = result['matchedIndices']
+                selected_options = [question_obj.options[i] for i in indices]
+                # print(f"   选项: {selected_options}",flush=True)
+                return selected_options
+            elif answer_type == 'judgment':
+                # print(f"   判断: {[result.get('answer')]}",flush=True)
+                return [result.get('answer')]
+            elif answer_type == 'text':
+                # print(f"   文本答案: {answer_source.answer}",flush=True)
+                return answer_source.answer
+        return result['form'].answer if result.get('form') else []
+    else:
+        print("未找到答案",flush=True)
+        return []

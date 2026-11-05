@@ -14,6 +14,7 @@ from selenium.webdriver.common.action_chains import ActionChains
 from task.tool.AIAsk import AIAsk
 from task.tool import color
 from task.tool import runtime_flags
+from task.tool.img_capture import extract_images, dedupe_images
 import pyautogui
 from selenium.webdriver.common.by import By
 import itertools
@@ -78,16 +79,26 @@ def check_internet(driver):
     except:
         pass
 
-def get_answer(API,question,typ,api_url='',api_model=''):
+def get_answer(API,question,typ,api_url='',api_model='',images=None):
     answer = []
     try:
-        answer = AIAsk(API, question, typ, api_url=api_url, api_model=api_model)
+        answer = AIAsk(API, question, typ, api_url=api_url, api_model=api_model,
+                       images=images or None)
     except Exception as e:
         print(f'答题时出错了{e}',flush=True)
     return answer
 def finish_video_question(driver, options_txt, options, answer, question_type):
     answer_num = []
     option_num = 0
+    # 去掉空串/'[]' 之类伪答案：answer=[''] 时 '' in option 恒为 True，
+    # 会把第一项误点成答案
+    if isinstance(answer, str):
+        answer = [answer]
+    answer = [str(a).strip() for a in (answer or [])
+              if str(a).strip() and str(a).strip() != '[]']
+    if not answer:
+        print(color.red('无可用答案，跳过该题'), flush=True)
+        return
     if question_type == '单选题' or question_type == '判断题':
         for option in options_txt:
             if answer[0] in option:
@@ -133,7 +144,15 @@ def check_video_question(driver,API,video_title_choice,api_url='',api_model=''):
         options_txt=[option.text for option in options]
         submit = element.find_element(By.ID, 'videoquiz-submit')
         if video_title_choice in ('AI 智能答题', 'DeepSeek AI'):
-            answer = get_answer(API,question_title+'\n'+str(options_txt),question_type,api_url=api_url,api_model=api_model)
+            # 识图：视频弹题同样可能只有图片题干/选项，先采集再交给多模态模型
+            _img_mark, _imgs = extract_images(driver, element, lazy=True)
+            if _img_mark:
+                question_title = question_title + ' ' + _img_mark
+                print(color.green(f'[识图] 视频题目含 {len(_imgs)} 张图片，已一并提交识别'),
+                      flush=True)
+            answer = get_answer(API,question_title+'\n'+str(options_txt),question_type,
+                                api_url=api_url,api_model=api_model,
+                                images=dedupe_images(_imgs))
             if type(answer) is str:
                 try:
                     answer = ast.literal_eval(answer)  # 转换为列表

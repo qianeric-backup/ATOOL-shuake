@@ -847,6 +847,18 @@ class StartWindow(QMainWindow):
         gl.addWidget(self.uxue_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
         gl.addWidget(self.uxue_check, self._detail_row_next - 1, 1, Qt.AlignmentFlag.AlignLeft)
 
+        self.image_qa_label = QLabel('识图答题:')
+        self.image_qa_check = QCheckBox('')
+        self.image_qa_check.setChecked(True)
+        self.image_qa_check.setToolTip(
+            '开启后自动拉取题干/选项里的图片（公式截图、函数图像、表格、代码图），\n'
+            '压缩成 base64 后交给多模态模型（如 deepseek 视觉版 / gpt-4o / qwen-vl）\n'
+            '直接读图作答；纯文本模型会自动降级为按文字题干作答。\n'
+            '图片题建议开启；只看文字题可关闭以减少请求体积。')
+        gl.addWidget(self.image_qa_label, _row(), 0, Qt.AlignmentFlag.AlignLeft)
+        gl.addWidget(self.image_qa_check, self._detail_row_next - 1, 1,
+                     Qt.AlignmentFlag.AlignLeft)
+
         self.homework_label = QLabel('选择作业:')
         self.homework_entry = QComboBox()
         self.homework_entry.addItems(['手动选择', '自动选择'])
@@ -2029,6 +2041,7 @@ class StartWindow(QMainWindow):
         data['lock_screen'] = 1 if self.lock_screen_check.isChecked() else 0
         data['debug_mode'] = 1 if self.debug_check.isChecked() else 0
         data['uxue_inject'] = 1 if self.uxue_check.isChecked() else 0
+        data['image_qa'] = 1 if self.image_qa_check.isChecked() else 0
         data['theme'] = self.theme_entry.currentText() if hasattr(self, 'theme_entry') else '明亮'
         return data
 
@@ -2242,6 +2255,8 @@ class StartWindow(QMainWindow):
         self.lock_screen_check.setChecked(bool(_as_int(data.get('lock_screen', 0))))
         self.debug_check.setChecked(bool(_as_int(data.get('debug_mode', 1), 1)))
         self.uxue_check.setChecked(bool(_as_int(data.get('uxue_inject', 0), 0)))
+        # 识图答题：老配置没有该字段时默认开启
+        self.image_qa_check.setChecked(bool(_as_int(data.get('image_qa', 1), 1)))
         # 恢复主题（默认明亮；暗黑时切换）
         saved_theme = data.get('theme', '明亮')
         try:

@@ -11,13 +11,14 @@ import traceback
 
 from selenium.common import NoSuchElementException
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.common.action_chains import ActionChains
 from task.tool.no_secret import DecodeSecret
 from task.tool import color
 import sys
 from task.tool.ai_wen_da import main,AnswerAPI,Question
 from task.tool.AIAsk import AIAsk
-from task.tool.img_capture import extract_images
+from task.tool.img_capture import extract_images, dedupe_images
 from task.tool.send_wx import send_error
 from task.tool.console import ensure_utf8_stdout
 
@@ -113,10 +114,20 @@ class Answer:
             self.use_ai_wen_da()
             self.use_ai_fallback()
             print(color.green('开始答题'), flush=True)
+            skipped = 0
             for title_num in self.num_answer_dit.keys():
+                # 空答案的题不进 finish_title：旧代码会让 answer[0] 抛
+                # IndexError('list index out of range')，整卷作答中断
+                if not self._answer_items(self.num_answer_dit.get(title_num)):
+                    skipped += 1
+                    print(color.red(f'第{title_num + 1}题无答案，跳过'), flush=True)
+                    continue
                 if self.finish_title(title_num):
                     self.reword_time += 1
                 time.sleep(1)
+            if skipped:
+                print(color.red(f'共{skipped}题未搜到答案，已留空，请人工补答后再提交'), flush=True)
+                self._dump_unanswered()
             self.ans_rate = (self.reword_time / len(self.questionList0)
                              if self.questionList0 else 0.0)
             print(self.reword_time, '/', len(self.questionList0))
@@ -129,6 +140,33 @@ class Answer:
                        self._raw_after_finish_question, self.times+1)
             elif self.times>=3:
                 print(color.red('测试答题失败，已重试3次'), flush=True)
+    def _dump_unanswered(self):
+        """把未搜到答案的题目落盘，便于人工补答（失败不影响主流程）。"""
+        try:
+            pending = [(tn, self.num_answer_dit.get(tn))
+                       for tn in self.num_answer_dit
+                       if not self._answer_items(self.num_answer_dit.get(tn))]
+            if not pending:
+                return
+            path = fr'task/record/《{self.course_name}》未答题目.txt'
+            with open(path, 'a', encoding='utf-8') as f:
+                f.write(f'\n=== {time.strftime("%Y-%m-%d %H:%M:%S")} 共{len(pending)}题未答 ===\n')
+                for tn, _ in pending:
+                    qtype = (self.questionType_list[tn]
+                             if tn < len(self.questionType_list) else '')
+                    text = self.only_title_text[tn] if tn < len(self.only_title_text) else ''
+                    options = self.num_option_dit.get(tn) or []
+                    f.write(f'第{tn + 1}题[{qtype}] {text}\n')
+                    for oi, opt in enumerate(options):
+                        # 页面选项文本通常自带 "A."/"A、" 前缀，避免重复加字母
+                        prefix = '' if re.match(r'^\s*[A-Ha-h]\s*[\.、,，:：]', opt) else chr(
+                            ord('A') + oi) + '. '
+                        f.write(f'    {prefix}{opt}\n')
+                    f.write('\n')
+            print(color.yellow(f'未答题目已记录到 {path}'), flush=True)
+        except Exception:
+            pass
+
     def get_title_option(self):
         self.driver.switch_to.frame(self.frame)
         self.driver.switch_to.frame('frame_content')
@@ -152,8 +190,9 @@ class Answer:
             self.title_element = self.title_and_option_element.find_element(By.CSS_SELECTOR,
                                                                             '[class="clearfix font-cxsecret fontLabel"]')
             self.title = re.sub(r'\s+', '', self.decodeSecret.decode(self.title_element.text).strip())
-            # 题干图片：采集并转 data URL（多模态 AI 直读），标注并入题干文本
-            _title_mark, _title_imgs = extract_images(self.driver, self.title_element)
+            # 题干图片：采集并转 data URL（多模态 AI 直读），标注并入题干文本。
+            # lazy=True：先把图滚进视口触发学习通的 data-src 懒加载
+            _title_mark, _title_imgs = extract_images(self.driver, self.title_element, lazy=True)
             # 题目类型（英文标记归一化为中文，未知题型保持原样走"无法作答"分支）
             self.questionType = self.title[self.title.find("【") + 1: self.title.find("】")]
             self.questionType = QUESTION_TYPE_ALIAS.get(
@@ -162,24 +201,31 @@ class Answer:
             self.title_text = self.title[self.title.find("】") + 1:]
             if _title_mark:
                 self.title_text = self.title_text + ' ' + _title_mark
+                # 题干只有图片时，纯文本题库检索不到任何内容，这里给出可读占位，
+                # 避免 free API 用空题干乱配到别的题，同时提示 AI 以图片为准
+                if not self.title_text.replace(_title_mark, '').strip():
+                    self.title_text = '（本题题干为图片，请以附图内容为准）' + _title_mark
             self.only_title_text.append(self.title_text)
             self.questionType_list.append(self.questionType)
             if self.questionType in ['单选题', '多选题','判断题']:
-                self.all_optionWebElementList.append(
-                    self.title_and_option_element.find_elements(By.TAG_NAME, 'li'))
+                _option_elements = self.title_and_option_element.find_elements(By.TAG_NAME, 'li')
+                self.all_optionWebElementList.append(_option_elements)
                 _opt_imgs = []
-                for option in self.title_and_option_element.find_elements(By.TAG_NAME, 'li'):
-                    _opt_mark, _opt_urls = extract_images(self.driver, option)
+                for option in _option_elements:
+                    # lazy=False：题干那次已经把整题图片滚进视口，选项不必重复滚动
+                    _opt_mark, _opt_urls = extract_images(self.driver, option, lazy=False)
                     _opt_imgs.extend(_opt_urls)
                     option_text = re.sub(r'\s+', '',
                                          self.decodeSecret.decode(option.text).strip())
                     if _opt_mark:
                         option_text = option_text + ' ' + _opt_mark
                     self.option_text_list.append(option_text)
-                self.question_images[i] = _title_imgs + _opt_imgs
+                # 同一张图可能既被题干容器命中又被选项命中，按内容哈希去重
+                self.question_images[i] = dedupe_images(_title_imgs + _opt_imgs)
             elif self.questionType in ['简答题', '论述题', '填空题','名词解释', '计算题']:
                 self.all_optionWebElementList.append(None)
                 self.option_text_list  =['']
+                self.question_images[i] = dedupe_images(_title_imgs)
             else:
                 print(color.red(f'第{i+1}题题型为{self.questionType},无法作答'))
                 # 占位必须追加，否则后面 supported 题在 all_optionWebElementList
@@ -199,10 +245,95 @@ class Answer:
         """
         if isinstance(raw, str):
             try:
-                return ast.literal_eval(raw)
+                raw = ast.literal_eval(raw)
             except (ValueError, SyntaxError):
-                return [raw.strip()] if raw.strip() else []
-        return raw
+                raw = [raw]
+        # literal_eval('"A"') 会返回字符串而不是列表（AI 偶发输出 "A"），
+        # 后续 answer[0] 会退化成取第一个字符，这里统一成列表
+        if isinstance(raw, str):
+            raw = [raw]
+        if not isinstance(raw, (list, tuple)):
+            raw = [raw]
+        # 过滤 None/空白/'[]' 之类伪答案，保证返回值元素均为可用字符串
+        items = []
+        for item in raw:
+            text = str(item).strip()
+            if text and text not in ('[]', 'None', 'null', '无', '不确定'):
+                items.append(text)
+        return items
+
+    @staticmethod
+    def _answer_items(answer):
+        """把任意形态的答案统一成非空字符串列表（str/list/tuple/嵌套）。"""
+        if answer is None:
+            return []
+        if isinstance(answer, str):
+            raw = [answer]
+        elif isinstance(answer, (list, tuple)):
+            raw = list(answer)
+        else:
+            raw = [answer]
+        items = []
+        for item in raw:
+            if isinstance(item, (list, tuple)):
+                items.extend(Answer._answer_items(item))
+                continue
+            text = str(item).strip()
+            if text and text not in ('[]', 'None', 'null', '无', '不确定'):
+                items.append(text)
+        return items
+
+    @staticmethod
+    def _letters_of(text):
+        """抽出 A-H 字母（大写），用于答案字母→选项下标映射。"""
+        return re.sub(r'[^A-Ha-h]', '', str(text)).upper()
+
+    _JUDGEMENT_ALIAS = {
+        '对': '正确', '√': '正确', '是': '正确', 'true': '正确', 't': '正确', 'y': '正确',
+        '错': '错误', '×': '错误', '否': '错误', 'false': '错误', 'f': '错误', 'n': '错误',
+    }
+
+    def _pick_option_index(self, items, options, multiple=False, judgement=False):
+        """把答案条目映射成选项下标列表。
+
+        匹配优先级：
+        1) 与选项文本完全相等（最常见：AI 直接返回选项原文）
+        2) 选项文本包含答案文本（长度 ≥2 才允许，避免 'A' 命中 'ABNORMAL'）
+        3) 纯 A-H 字母串 → 按字母序映射下标（图片选项/无文字选项场景）
+        任何一条对不上都不抛异常，只丢弃该条目，由调用方决定跳过本题。
+        """
+        options = options or []
+        count = len(options)
+        picked = []
+        for item in items:
+            if judgement:
+                # 判断题 AI 常回 对/错/√/×/T/F，页面选项文本是 正确/错误
+                item = self._JUDGEMENT_ALIAS.get(str(item).strip().lower(), item)
+            index = None
+            for i, opt in enumerate(options):
+                if item == opt:
+                    index = i
+                    break
+            if index is None and len(item) >= 2:
+                for i, opt in enumerate(options):
+                    if opt and item in opt:
+                        index = i
+                        break
+            if index is None:
+                letters = self._letters_of(item)
+                # 仅当答案本身就是字母串（如 'ABD'、'A.'）时才走字母映射，
+                # 否则 'TCP' 这类文本答案会被误映射到 C/P 之外的非法下标
+                if letters and re.fullmatch(r'[A-H]+', letters) and len(letters) == len(
+                        re.sub(r'[^A-Za-z]', '', item)):
+                    candidates = [ord(ch) - ord('A') for ch in letters]
+                    if multiple:
+                        picked.extend([c for c in candidates if 0 <= c < count])
+                        continue
+                    if 0 <= candidates[0] < count:
+                        index = candidates[0]
+            if index is not None and 0 <= index < count and index not in picked:
+                picked.append(index)
+        return picked
 
     def _click_option(self, li_element, desc):
         """遮挡安全点击。
@@ -316,9 +447,15 @@ class Answer:
                     if num >= len(parts):
                         break   # AI 返回的答案数不足时只跳过剩余题，不越界
                     ans_text = parts[num].strip()
+                    # 计数器必须无条件推进：AI 对某题返回 '[]' 时若跳过自增，
+                    # 后续答案会整体错位一题，答到别题上
+                    num += 1
                     if ans_text and ans_text != '[]':
                         # AI 对答不出的题可能输出 '[]'，视为无答案留空
-                        self.num_answer_dit[key] = re.split(',', ans_text)
+                        self.num_answer_dit[key] = self._parse_answer_list(
+                            re.split(r'[,，]', ans_text))
+                        if not self.num_answer_dit[key]:
+                            continue
                         # 缓存答案
                         question = Question(
                             type=str(self.questionType_list[key]),  # 题目类型
@@ -326,7 +463,6 @@ class Answer:
                             options=self.num_option_dit[key],
                             API=self.API_KEY)
                         AnswerAPI().cache_answer(question, self.num_answer_dit[key])
-                    num += 1
             except Exception:
                 # AI 兜底失败不应终止整课：无答案的题保持空答案，
                 # 后续照常保存/提交，其余题不受影响
@@ -334,6 +470,149 @@ class Answer:
                 print(color.red('AI 兜底搜题失败，无答案的题将留空'), flush=True)
                 self.no_answer_dit.clear()
 
+
+    # ---------------- 填空题（UEditor 富文本）----------------
+    @staticmethod
+    def _split_blank_answer(answer):
+        """多空答案拆分：AI/题库给的多空答案用中英文逗号或换行分隔。
+
+        旧实现用空格 split，会把"位同步 帧定界"这类含空格的单个答案切碎，
+        也可能把整段答案塞进第一个空——这里改为只认逗号/分号。
+        """
+        if not answer:
+            return []
+        if isinstance(answer, (list, tuple)):
+            if len(answer) > 1:
+                return [str(a).strip() for a in answer if str(a).strip()]
+            answer = answer[0] if answer else ''
+        letter = str(answer)
+        parts = [p.strip() for p in re.split(r'[,，;；\n]+', letter) if p.strip()]
+        return parts
+
+    def _fill_one_blank(self, textarea_id, text):
+        """写入单个空位。返回 (成功?, UEditor 当前内容)。"""
+        res = self.driver.execute_script(
+            '''const id = arguments[0], txt = arguments[1];
+               const ta = document.getElementById(id);
+               if (!ta) return {ok: false, why: 'no-textarea', content: ''};
+               const all = (window.UE && window.UE.instants) || {};
+               let inst = null;
+               Object.keys(all).forEach(function(k){
+                   const i2 = all[k];
+                   if (!inst && i2 && i2.key === id) inst = i2;
+               });
+               if (inst && typeof inst.setContent === 'function') {
+                   try {
+                       inst.setContent('<p>' + txt + '</p>');
+                       let c = '';
+                       try { c = inst.getContent() || ''; } catch (e) { c = ''; }
+                       return {ok: true, why: 'ue-setContent', content: c};
+                   } catch (e) {
+                       return {ok: false, why: 'setContent:' + e.message, content: ''};
+                   }
+               }
+               // 编辑器实例缺失（懒加载未完成）：直接写数据载体并派发事件
+               try {
+                   ta.value = '<p>' + txt + '</p>';
+                   ta.dispatchEvent(new Event('input', {bubbles: true}));
+                   ta.dispatchEvent(new Event('change', {bubbles: true}));
+                   return {ok: true, why: 'textarea-direct', content: ta.value};
+               } catch (e) {
+                   return {ok: false, why: 'textarea:' + e.message, content: ''};
+               }''', textarea_id, text)
+        return bool(res and res.get('ok')), (res or {}).get('content')
+
+    def _read_one_blank(self, textarea_id):
+        """回读空位当前内容（优先 UEditor 实例，其次 textarea.value）。"""
+        return self.driver.execute_script(
+            '''const id = arguments[0];
+               const ta = document.getElementById(id);
+               if (!ta) return '';
+               const all = (window.UE && window.UE.instants) || {};
+               let inst = null;
+               Object.keys(all).forEach(function(k){
+                   const i2 = all[k];
+                   if (!inst && i2 && i2.key === id) inst = i2;
+               });
+               if (inst && typeof inst.getContent === 'function') {
+                   try { return inst.getContent() || ''; } catch (e) { return ta.value || ''; }
+               }
+               return ta.value || '';''', textarea_id)
+
+    def fill_blank_question(self, title_num, answer):
+        """填空题作答：按 textarea（= 空位）逐个写入，并回读校验。"""
+        question = self.questionList0[title_num]
+        textareas = [ta for ta in question.find_elements(By.TAG_NAME, 'textarea')
+                     if (ta.get_attribute('id') or '').startswith('answerEditor')]
+        if not textareas:
+            # 兜底：整页找顺序在本题范围之后的编辑器（个别页面 textarea 挂在题目外层）
+            print(color.red('填空题未找到输入框（answerEditor），已跳过该题'), flush=True)
+            return False
+        # textarea 在 DOM 中的顺序即空号顺序（answerEditor<题目ID><空号>），
+        # 不能从 id 里切空号：题目 ID 本身是纯数字，与序号连写无法区分边界。
+        blank_ids = [ta.get_attribute('id') for ta in textareas]
+        parts = self._split_blank_answer(answer)
+        if not parts:
+            print(color.red('填空题无可用答案，已跳过该题'), flush=True)
+            return False
+        if len(parts) < len(blank_ids):
+            print(color.red(f'填空题答案数量({len(parts)})少于题目空数({len(blank_ids)})，'
+                            f'先填前 {len(parts)} 个空'), flush=True)
+        elif len(parts) > len(blank_ids):
+            print(color.yellow(f'填空题答案数量({len(parts)})多于题目空数({len(blank_ids)})，'
+                               f'按空位数截断'), flush=True)
+            parts = parts[:len(blank_ids)]
+        filled = 0
+        for number, ta_id in enumerate(blank_ids):
+            if number >= len(parts):
+                break
+            try:
+                before = (self._read_one_blank(ta_id) or '').strip()
+            except Exception:
+                before = ''
+            if before:
+                print(color.red(f'第{number + 1}空已回答，无需重复回答'), flush=True)
+                filled += 1
+                continue
+            ok, content = self._fill_one_blank(ta_id, parts[number])
+            if ok and content:
+                print(color.green(f'填空题第{number + 1}空已填入：{parts[number]}'), flush=True)
+                filled += 1
+            else:
+                print(color.red(f'填空题第{number + 1}空写入失败' +
+                                (f'（{content}）' if content else '')), flush=True)
+            time.sleep(0.5)
+        if filled == 0:
+            print(color.red('填空题全部空位写入失败，该题未作答'), flush=True)
+            return False
+        if filled < len(blank_ids):
+            print(color.yellow(f'填空题仅完成 {filled}/{len(blank_ids)} 个空'), flush=True)
+        return True
+
+    def _fill_one_blank_keyboard(self, iframe_el, text):
+        """备用通道：真实键入（需要 iframe body 可聚焦；UEditor 内 p 不可键盘交互）。
+
+        保留作为 UE 实例拿不到时的兜底手段，成功与否由回读判定。
+        """
+        try:
+            self.driver.switch_to.frame(iframe_el)
+            bodies = self.driver.find_elements(By.TAG_NAME, 'body')
+            if not bodies:
+                self.driver.switch_to.default_content()
+                return False
+            body = bodies[0]
+            self.driver.execute_script("arguments[0].click();", body)
+            self.driver.execute_script("arguments[0].focus();", body)
+            body.send_keys(text)
+            body.send_keys(Keys.TAB)
+            self.driver.switch_to.default_content()
+            return True
+        except Exception:
+            try:
+                self.driver.switch_to.default_content()
+            except Exception:
+                pass
+            return False
 
     def finish_title(self, title_num):
         try:
@@ -343,76 +622,69 @@ class Answer:
         except:
             pass
         print(color.green(f'正在回答第{title_num + 1}题...'), flush=True)
-        answer=self.num_answer_dit[title_num]
-        #去重
+        answer=self.num_answer_dit.get(title_num) or []
+        # 去重
         print(color.green(f'该题为{self.questionType_list[title_num]}，答案：{answer}'), flush=True)
+        # 空答案护栏：题库未收录且 AI 兜底也失败时 answer 为 []（或 ['']），
+        # 旧代码直接 answer[0] → IndexError: list index out of range 中断整卷
+        items = self._answer_items(answer)
+        if not items:
+            print(color.red(f'第{title_num + 1}题无可用答案，已跳过（可人工补答）'), flush=True)
+            return False
         option_num=0
         try:
             if self.questionType_list[title_num]=='单选题' or self.questionType_list[title_num]=='判断题':
-                _opts = self.num_option_dit[title_num]
-                for option in _opts:
-                    if answer[0] in option:
-                       break
-                    option_num+=1
-                if option_num >= len(_opts):
-                    # 文本匹配失败：AI 可能返回字母（图片选项无文字时）
-                    # 按 A/B/C/D 字母序直接映射选项下标
-                    _letter = re.sub(r'[^A-Ha-h]', '', str(answer[0])).upper()
-                    if _letter:
-                        _idx = ord(_letter[0]) - ord('A')
-                        if 0 <= _idx < len(_opts):
-                            option_num = _idx
-                            print(color.yellow(f'按选项字母 {_letter[0]} 匹配第{option_num+1}项'), flush=True)
-                        else:
-                            print(color.red(f'答案字母 {_letter} 超出选项范围，跳过该题'), flush=True)
-                            return False
-                    else:
-                        print(color.red(f'答案与任何选项都不匹配，跳过该题'), flush=True)
-                        return False
-                if self.all_optionWebElementList[title_num][option_num].get_attribute('aria-checked')== 'true':
+                _opts = self.num_option_dit.get(title_num) or []
+                _opts_el = (self.all_optionWebElementList[title_num]
+                            if title_num < len(self.all_optionWebElementList) else None)
+                if not _opts:
+                    print(color.red(f'第{title_num+1}题未取到选项文本，跳过该题'), flush=True)
+                    return False
+                picked = self._pick_option_index(
+                    items[:1], _opts,
+                    judgement=(self.questionType_list[title_num] == '判断题'))
+                if not picked:
+                    print(color.red(f'答案{items[:1]}与任何选项都不匹配，跳过该题'), flush=True)
+                    return False
+                option_num = picked[0]
+                if not _opts_el or option_num >= len(_opts_el):
+                    print(color.red(f'第{title_num+1}题选项元素缺失（页面未渲染完），跳过该题'), flush=True)
+                    return False
+                if _opts_el[option_num].get_attribute('aria-checked') == 'true':
                     print(color.red('已回答，无需重复回答'),flush=True)
                 else:
-                    self._click_option(self.all_optionWebElementList[title_num][option_num],
+                    self._click_option(_opts_el[option_num],
                                        f'第{title_num+1}题选项{option_num+1}')
                 return True
             elif self.questionType_list[title_num] == '多选题':
-                self.answer_num=[]
-                if len(answer)==1:
-                    lst = answer[0]
-                else:
-                    lst = answer
-                for option in self.num_option_dit[title_num]:
-                    for ans in lst:
-                        if ans in option:
-                           self.answer_num .append(option_num)
-                    option_num+=1
+                _opts = self.num_option_dit.get(title_num) or []
+                _opts_el = (self.all_optionWebElementList[title_num]
+                            if title_num < len(self.all_optionWebElementList) else None)
+                if not _opts:
+                    print(color.red(f'第{title_num+1}题未取到选项文本，跳过该题'), flush=True)
+                    return False
+                self.answer_num = self._pick_option_index(items, _opts, multiple=True)
                 if not self.answer_num:
-                    # 文本匹配失败：按答案字母（A/B/C/D）直接映射选项下标
-                    for ans in lst:
-                        _letter = re.sub(r'[^A-Ha-h]', '', str(ans)).upper()
-                        if _letter:
-                            _idx = ord(_letter[0]) - ord('A')
-                            if 0 <= _idx < len(self.num_option_dit[title_num]):
-                                self.answer_num.append(_idx)
-                    if self.answer_num:
-                        print(color.yellow(f'多选题按字母映射选项：{sorted(set(self.answer_num))}'), flush=True)
-                    else:
-                        print(color.red(f'多选题答案与任何选项都不匹配，跳过该题'), flush=True)
-                        return False
-                self.answer_num=list(set(self.answer_num))
+                    print(color.red(f'多选题答案{items}与任何选项都不匹配，跳过该题'), flush=True)
+                    return False
+                if _opts_el:
+                    self.answer_num = [i for i in self.answer_num if i < len(_opts_el)]
+                if not self.answer_num:
+                    print(color.red(f'第{title_num+1}题选项元素缺失（页面未渲染完），跳过该题'), flush=True)
+                    return False
                 # 点击正确答案
                 for ans in self.answer_num:
                     time.sleep(1)
                     try:
-                        if self.all_optionWebElementList[title_num][ans].get_attribute('aria-checked')== 'true':
+                        if _opts_el[ans].get_attribute('aria-checked')== 'true':
                             print(color.red('已回答，无需重复回答'), flush=True)
                         else:
-                            self._click_option(self.all_optionWebElementList[title_num][ans],
+                            self._click_option(_opts_el[ans],
                                                f'第{title_num+1}题选项{ans+1}')
                     except Exception:
                         try:
                             self.driver.execute_script(
-                                "arguments[0].click();", self.all_optionWebElementList[title_num][ans])
+                                "arguments[0].click();", _opts_el[ans])
                         except Exception:
                             pass
                 return True
@@ -455,38 +727,13 @@ class Answer:
                 print(color.red('该题富文本编辑框不可写，已跳过'), flush=True)
                 return False
             elif self.questionType_list[title_num]=='填空题':
-                if self.work_choice is not None:
-                    elements = self.questionList0[title_num].find_elements(By.CLASS_NAME, 'InpDIV')
-                else:
-                    elements = self.questionList0[title_num].find_elements(By.CSS_SELECTOR,
-                                                                           '[class="edui-editor-iframeholder edui-default"]')
-                text_frames = self.questionList0[title_num].find_elements(By.TAG_NAME, 'iframe')
-                if  len(answer)==1:
-                    answer=re.split(r' ', answer[0])
-                    print(color.red(f'修正答案：{answer}'), flush=True)
-                if len(elements)>len(answer):
-                    print(color.red('填空题答案数量少于题目数量'), flush=True)
-                    return False
-                for number in range(len(elements)):
-                    self.driver.execute_script("arguments[0].click();", elements[number])
-                    self.driver.switch_to.frame(text_frames[number])
-                    p_element = self.driver.find_element(By.TAG_NAME, 'p')
-                    check_answer = p_element.text
-                    if check_answer != '':
-                        print(color.red('已回答，无需重复回答'), flush=True)
-                        self.driver.switch_to.parent_frame()
-                        continue
-                    try:
-                        p_element.click()
-                    except:
-                        self.driver.execute_script("arguments[0].click();", p_element)
-                    try:
-                        p_element.send_keys(answer[number])
-                    except:
-                        pass
-                    self.driver.switch_to.parent_frame()
-                    time.sleep(1)
-                return True
+                # 学习通填空题用的是 UEditor 富文本编辑器（不是 input/InpDIV）：
+                # 每空一个 .edui-editor，真实数据载体是隐藏 textarea
+                # name="answerEditor<题目ID><空序号>"，内容必须经 UE.instants 的
+                # setContent 写入——旧的 p_element.send_keys 会被 Selenium 拒绝
+                # （ElementNotInteractableException: <p> is not reachable by keyboard），
+                # 且异常被吞掉，表现为"填空题整题不填"。
+                return self.fill_blank_question(title_num, answer)
             else:
                 print(color.red(f'该题为{self.questionType}，暂时无法作答'), flush=True)
                 return False

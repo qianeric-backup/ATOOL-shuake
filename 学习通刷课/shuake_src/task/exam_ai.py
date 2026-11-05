@@ -16,6 +16,7 @@ from selenium.webdriver.common.by import By
 from task.quiz_ai import Answer
 from task.do_work import turn_page
 from task.tool import color
+from task.tool.img_capture import extract_images, dedupe_images
 
 
 class do_exam(Answer):
@@ -157,6 +158,7 @@ class do_exam(Answer):
         self.optionWebElementList = []
         self.questionType_list = []
         self.only_title_text = []
+        self.question_images = {}      # 题号 -> 题干/选项图片 data URL 列表
         self.answer_num = []
         # 题目元素：与作业同构，泛化匹配以兼容 exam-ans 新版
         self.questionList0 = []
@@ -211,6 +213,14 @@ class do_exam(Answer):
             except Exception:
                 self.title = self.questionList0[i].text
             self.title_text = self.title
+            # 识图：考试题干/选项图片同样转 data URL 交给多模态模型
+            _img_mark, _imgs = extract_images(
+                self.driver, self.questionList0[i], lazy=True)
+            if _img_mark:
+                if not self.title_text.strip():
+                    self.title_text = '（本题题干为图片，请以附图内容为准）'
+                self.title_text = self.title_text + ' ' + _img_mark
+            self.question_images[i] = dedupe_images(_imgs)
             self.only_title_text.append(self.title_text)
             self.questionType_list.append(self.questionType)
             self.all_title_dit[i] = self.title_text

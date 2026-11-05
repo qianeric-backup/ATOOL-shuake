@@ -7,6 +7,7 @@
 - **定时自动刷课**：模拟真实用户观看视频，支持倍速调节（最高 16 倍速），可设定开始与结束时间。
 - **连续刷多门课程**：最多连续刷 3 门课程，全程自动操作。
 - **AI 自动答题**：章节测验、作业、视频弹题、讨论均可接入任意 OpenAI 兼容 API（DeepSeek、OpenRouter、本地 vLLM 等）自动作答；未配置 AI 时也可用免费题库优先检索。
+- **识图答题（多模态）**：自动拉取题干/选项里的图片（公式截图、函数图像、表格、代码图、电路图），压缩成 base64 后交给多模态模型（deepseek 视觉版 / gpt-4o / qwen-vl 等）直接读图作答；纯图片题会跳过题库直连 AI，避免文本检索乱配到相似题。
 - **自动跳过人脸认证**：第一次刷脸成功后，后续自动跳过。
 - **自动刷直播、播放音频、回复讨论、播放 PPT**。
 - **可视化控制**：PySide6（Qt）图形界面，可查看刷课日志、测试成绩、缓存题库与报错日志。
@@ -34,6 +35,31 @@ python -m PyInstaller 学习通刷课.spec --noconfirm --clean
 ```bash
 pip install selenium pyautogui requests PySide6 colorama openai
 ```
+
+## 识图答题（多模态）
+
+题目里的图片不再被忽略：`task/tool/img_capture.py` 会在解析每道题时
+
+1. 把题目容器内所有 `<img>` 逐个滚进视口，触发学习通 `data-src` 懒加载；
+2. 等 `img.complete && naturalWidth` 就绪后，用 canvas 缩到最长边 1400px、
+   JPEG 0.9 编码成 data URL（canvas 跨域被污染时回退
+   `fetch(credentials:'include')` → blob → base64）；
+3. 过滤 < 60px 的图标/分隔线，按内容哈希去重，单题最多 8 张；
+4. 题干/选项文本里补 `[图片]` 标记，图片列表交给 `AIAsk(images=[...])`
+   以 OpenAI 多模态格式（`type: "image_url"`）随请求发送。
+
+相关开关（`task/tool/account_info.json`，GUI「识图答题」复选框同步写入）：
+
+| 字段 | 默认 | 说明 |
+| --- | --- | --- |
+| `image_qa` | 1 | 识图总开关。关闭后完全不采集图片，按纯文本作答 |
+| `image_max` | 8 | 单题最多附带几张图片 |
+| `image_ocr` | 0 | 本地 OCR 增强（需 `pytesseract` + tesseract），开启后每题多耗几秒 |
+| `image_url_fallback` | 1 | 页面内取不到图片像素（CDN 不带 CORS 头）时，退化为把图片直链交给模型服务端抓取 |
+
+模型不支持图片输入时会自动降级为文本作答（日志里会提示），不会中断整卷。
+若配置的是纯文本模型（如官方 `deepseek-chat`），图片会被忽略——要识图请把
+模型名填成该服务商的视觉模型（如 `deepseek-flash`、`gpt-4o`、`qwen-vl-max`）。
 
 ## 配置说明
 
